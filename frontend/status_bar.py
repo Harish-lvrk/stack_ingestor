@@ -1,4 +1,4 @@
-"""frontend/status_bar.py — Service health indicator bar."""
+"""frontend/status_bar.py — Service health indicator bar (light theme)."""
 
 import requests
 import streamlit as st
@@ -15,7 +15,7 @@ def _check(url: str, timeout: float = 2.0) -> bool:
 
 
 def render_status_bar() -> None:
-    """Render three service-health cards in a row using Streamlit metric-style HTML."""
+    """Render three service-health cards in a row."""
     stac_ok  = _check(STAC_API_INTERNAL)
     tit_ok   = _check(f"{TITILER_URL}/healthz")
     files_ok = _check(FILE_SERVER_URL)
@@ -29,10 +29,10 @@ def render_status_bar() -> None:
     cols = st.columns(3)
     for col, (name, port, ok) in zip(cols, services):
         status_text  = "Online"  if ok else "Offline"
-        dot_color    = "#3fb950" if ok else "#f85149"
-        bg_color     = "rgba(35,134,54,0.12)" if ok else "rgba(218,54,51,0.12)"
-        border_color = "rgba(35,134,54,0.4)"  if ok else "rgba(218,54,51,0.4)"
-        text_color   = "#3fb950" if ok else "#f85149"
+        dot_color    = "#16a34a" if ok else "#dc2626"
+        bg_color     = "#f0fdf4" if ok else "#fef2f2"
+        border_color = "#86efac" if ok else "#fca5a5"
+        text_color   = "#15803d" if ok else "#dc2626"
 
         col.markdown(f"""
 <div style="
@@ -44,14 +44,13 @@ def render_status_bar() -> None:
 ">
   <span style="
       width:9px; height:9px; border-radius:50%;
-      background:{dot_color}; display:inline-block;
-      flex-shrink:0;
+      background:{dot_color}; display:inline-block; flex-shrink:0;
       {'animation:pulse 2s infinite;' if ok else ''}
   "></span>
   <div>
-    <div style="font-weight:700; font-size:0.82rem; color:#c9d1d9;">{name}</div>
+    <div style="font-weight:700; font-size:0.82rem; color:#1e293b;">{name}</div>
     <div style="font-size:0.72rem; color:{text_color}; margin-top:1px;">
-        {status_text} · <span style="color:#6b7590;">{port}</span>
+        {status_text} · <span style="color:#94a3b8;">{port}</span>
     </div>
   </div>
 </div>

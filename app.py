@@ -31,22 +31,22 @@ inject_css()
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="
-    padding: 1.2rem 0 0.4rem;
-    border-bottom: 1px solid #1e2740;
+    padding: 1.2rem 0 0.6rem;
+    border-bottom: 1px solid #e2e8f0;
     margin-bottom: 1.2rem;
 ">
   <h1 style="
       font-size: 2rem; font-weight: 800; margin: 0; line-height: 1.2;
-      background: linear-gradient(90deg, #58a6ff 0%, #00d4ff 60%, #79c0ff 100%);
+      background: linear-gradient(90deg, #1d4ed8 0%, #2563eb 50%, #0ea5e9 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   ">🛰️ STAC Manager</h1>
   <div style="margin-top:0.4rem; display:flex; gap:0.5rem; align-items:center;">
     <span style="
-        background: rgba(88,166,255,0.1); border:1px solid rgba(88,166,255,0.3);
-        color:#58a6ff; font-size:0.72rem; font-weight:600;
+        background:#eff6ff; border:1px solid #bfdbfe;
+        color:#2563eb; font-size:0.72rem; font-weight:600;
         padding:2px 10px; border-radius:20px; letter-spacing:0.05em;
     ">STAC 1.0.0</span>
-    <span style="color:#6b7590; font-size:0.82rem;">
+    <span style="color:#64748b; font-size:0.82rem;">
         Ingest · Manage Collections · Browse Items
     </span>
   </div>
