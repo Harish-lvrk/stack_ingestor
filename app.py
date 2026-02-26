@@ -31,23 +31,25 @@ inject_css()
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="
-    padding: 1.2rem 0 0.6rem;
-    border-bottom: 1px solid #e2e8f0;
-    margin-bottom: 1.2rem;
+    padding: 1.5rem 0 0.8rem;
+    margin-bottom: 1.5rem;
 ">
   <h1 style="
-      font-size: 2rem; font-weight: 800; margin: 0; line-height: 1.2;
-      background: linear-gradient(90deg, #1d4ed8 0%, #2563eb 50%, #0ea5e9 100%);
+      font-size: 2.25rem; font-weight: 800; margin: 0; line-height: 1.1;
+      color: #0f172a;
+      letter-spacing: -0.02em;
+  ">🛰️ <span style="
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 30%, #4f46e5 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  ">🛰️ STAC Manager</h1>
-  <div style="margin-top:0.4rem; display:flex; gap:0.5rem; align-items:center;">
+  ">STAC Manager</span></h1>
+  <div style="margin-top:0.6rem; display:flex; gap:0.6rem; align-items:center;">
     <span style="
-        background:#eff6ff; border:1px solid #bfdbfe;
-        color:#2563eb; font-size:0.72rem; font-weight:600;
-        padding:2px 10px; border-radius:20px; letter-spacing:0.05em;
-    ">STAC 1.0.0</span>
-    <span style="color:#64748b; font-size:0.82rem;">
-        Ingest · Manage Collections · Browse Items
+        background:#eef2ff; border:1px solid #c7d2fe;
+        color:#4f46e5; font-size:0.75rem; font-weight:700;
+        padding:3px 12px; border-radius:100px; letter-spacing:0.02em;
+    ">CORE 1.0.0</span>
+    <span style="color:#64748b; font-size:0.88rem; font-weight:500;">
+        Ingest · Collections · Browse
     </span>
   </div>
 </div>
