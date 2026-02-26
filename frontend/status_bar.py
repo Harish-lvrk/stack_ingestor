@@ -29,37 +29,22 @@ def render_status_bar() -> None:
     cols = st.columns(3)
     for col, (name, port, ok) in zip(cols, services):
         status_text  = "Operational" if ok else "Degraded"
-        dot_color    = "#10b981" if ok else "#ef4444" # Emerald-500 / Red-500
-        bg_color     = "#ffffff"
-        border_color = "#f1f5f9"
-        text_color   = "#059669" if ok else "#dc2626" # Emerald-600 / Red-600
+        dot_color    = "#10b981" if ok else "#ef4444" 
+        text_color_cls = "color:#10b981;" if ok else "color:#ef4444;"
 
         col.markdown(f"""
-<div style="
-    background:{bg_color};
-    border:1px solid {border_color};
-    border-radius:12px;
-    padding:0.8rem 1.2rem;
-    display:flex; align-items:center; gap:0.8rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-">
-  <span style="
-      width:10px; height:10px; border-radius:50%;
-      background:{dot_color}; display:inline-block; flex-shrink:0;
+<div class="status-card">
+  <span class="status-dot" style="
+      background:{dot_color};
       box-shadow: 0 0 8px {dot_color}66;
       {'animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;' if ok else ''}
   "></span>
   <div>
-    <div style="font-weight:700; font-size:0.85rem; color:#0f172a; margin-bottom:1px;">{name}</div>
-    <div style="font-size:0.75rem; color:{text_color}; font-weight:500;">
-        {status_text} · <span style="color:#64748b; font-weight:400;">{port}</span>
+    <div class="status-name">{name}</div>
+    <div style="font-size:0.75rem; {text_color_cls} font-weight:500;">
+        {status_text} · <span style="color:var(--text-muted); font-weight:400;">{port}</span>
     </div>
   </div>
 </div>
-<style>
-@keyframes pulse {{
-  0%, 100% {{ opacity: 1; transform: scale(1); }}
-  50% {{ opacity: 0.6; transform: scale(0.95); }}
-}}
-</style>
 """, unsafe_allow_html=True)
+

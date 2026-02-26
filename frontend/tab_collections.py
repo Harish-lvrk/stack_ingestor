@@ -123,8 +123,8 @@ def render_grid_view(all_cols) -> None:
             with cols[idx % 3]:
                 st.markdown(f"""
                 <div class="stcard">
-                    <h3 style="margin-top:0; color:#4f46e5; font-size:1.1rem;">{title}</h3>
-                    <p style="font-size:0.85rem; color:#64748b; height:60px; overflow:hidden;">{desc}</p>
+                    <h3 style="margin-top:0; color:var(--accent); font-size:1.1rem;">{title}</h3>
+                    <p style="font-size:0.85rem; color:var(--text-muted); height:60px; overflow:hidden;">{desc}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button(f"View {cid} →", key=f"view_btn_{cid}", use_container_width=True):
@@ -149,15 +149,15 @@ def render_detail_view(col_id, all_cols) -> None:
 
     st.markdown(f"""
     <div style="margin-bottom: 2rem;">
-        <h1 style="font-size:1.8rem; margin-bottom:0.2rem;">{collection.get('title') or col_id}</h1>
-        <code style="background:#f1f5f9; padding:2px 8px; border-radius:4px;">ID: {col_id}</code>
+        <h1 style="font-size:1.8rem; margin-bottom:0.2rem; color:var(--text-head);">{collection.get('title') or col_id}</h1>
+        <code style="background:var(--bg-input); color:var(--text-primary); padding:2px 8px; border-radius:4px; border:1px solid var(--border-main);">ID: {col_id}</code>
     </div>
     """, unsafe_allow_html=True)
 
     left_col, right_col = st.columns([6, 4])
 
     with left_col:
-        st.markdown('<p style="font-weight:600; margin-bottom:0.8rem;">🌍 Collection Extent & Footprints</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-weight:600; margin-bottom:0.8rem; color:var(--text-primary);">🌍 Collection Extent & Footprints</p>', unsafe_allow_html=True)
         try:
             m = _render_collection_map(collection)
             st_folium(m, width="100%", height=450, key=f"map_{col_id}")
@@ -165,7 +165,7 @@ def render_detail_view(col_id, all_cols) -> None:
             st.error(f"Map rendering error: {e}")
 
     with right_col:
-        st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;"><p style="font-weight:600; margin:0;">📦 Items</p></div>', unsafe_allow_html=True)
+        st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;"><p style="font-weight:600; margin:0; color:var(--text-primary);">📦 Items</p></div>', unsafe_allow_html=True)
         items = fetch_items(col_id, limit=20)
         
         if not items:
@@ -184,8 +184,8 @@ def render_detail_view(col_id, all_cols) -> None:
                         <div class="thumbnail-container" style="margin-bottom:0.5rem;">
                             <img src="{preview_url}" onerror="this.src='https://placehold.co/150x100?text=No+Preview'">
                         </div>
-                        <div style="font-weight:700; font-size:0.8rem; color:#4f46e5; line-height:1.2; word-break:break-all;">{iid}</div>
-                        <div style="font-size:0.7rem; color:#94a3b8; margin-top:auto;">{idt}</div>
+                        <div style="font-weight:700; font-size:0.8rem; color:var(--accent); line-height:1.2; word-break:break-all;">{iid}</div>
+                        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:auto;">{idt}</div>
                     </div>
                     """, unsafe_allow_html=True)
                     if st.button("Details", key=f"det_{iid}", use_container_width=True):

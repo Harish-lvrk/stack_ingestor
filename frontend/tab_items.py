@@ -149,16 +149,16 @@ def _metadata_section(item, col_id):
     # Collection info
     st.markdown(f"""
 <div style="margin-bottom:1.5rem;">
-  <p style="font-weight:700; font-size:1.05rem; color:#0f172a; margin-bottom:0.6rem;">🗂️ Collection</p>
-  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:0.8rem 1rem;">
-    <span style="font-weight:600; color:#2563eb;">{col_id}</span>
+  <p style="font-weight:700; font-size:1.05rem; color:var(--text-head); margin-bottom:0.6rem;">🗂️ Collection</p>
+  <div style="background:var(--bg-input); border:1px solid var(--border-main); border-radius:10px; padding:0.8rem 1rem;">
+    <span style="font-weight:600; color:var(--accent);">{col_id}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
     # General metadata
-    st.markdown('<p style="font-weight:700; font-size:1.05rem; color:#0f172a; margin-bottom:0.6rem;">📊 Metadata</p>', unsafe_allow_html=True)
-    st.markdown("<p style='font-weight:600; font-size:0.9rem; color:#475569;'>General</p>", unsafe_allow_html=True)
+    st.markdown('<p style="font-weight:700; font-size:1.05rem; color:var(--text-head); margin-bottom:0.6rem;">📊 Metadata</p>', unsafe_allow_html=True)
+    st.markdown("<p style='font-weight:600; font-size:0.9rem; color:var(--text-muted);'>General</p>", unsafe_allow_html=True)
     
     general = []
     if props.get("gsd"):
@@ -176,7 +176,7 @@ def _metadata_section(item, col_id):
 
     # Bands
     if eo_bands:
-        st.markdown("<p style='font-weight:600; font-size:0.9rem; color:#475569; margin-top:1rem;'>Bands</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-weight:600; font-size:0.9rem; color:var(--text-muted); margin-top:1rem;'>Bands</p>", unsafe_allow_html=True)
         header = "<tr><td style='font-weight:700;'>Name</td><td style='font-weight:700;'>Common Name</td></tr>"
         rows = "".join(
             f"<tr><td>{b.get('name','—')}</td><td>{b.get('common_name','—')}</td></tr>"
@@ -186,21 +186,21 @@ def _metadata_section(item, col_id):
 
     # Projection
     if props.get("proj:epsg"):
-        st.markdown("<p style='font-weight:600; font-size:0.9rem; color:#475569; margin-top:1rem;'>Projection</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-weight:600; font-size:0.9rem; color:var(--text-muted); margin-top:1rem;'>Projection</p>", unsafe_allow_html=True)
         st.markdown(f"""
 <table class="stac-table">
-  <tr><td>Code</td><td><a href="https://epsg.io/{props['proj:epsg']}" target="_blank" style="color:#2563eb;">EPSG:{props['proj:epsg']}</a></td></tr>
+  <tr><td>Code</td><td><a href="https://epsg.io/{props['proj:epsg']}" target="_blank" style="color:var(--accent);">EPSG:{props['proj:epsg']}</a></td></tr>
 </table>""", unsafe_allow_html=True)
 
-    # Delete
-    st.markdown('<p style="font-weight:700; font-size:0.9rem; color:#0f172a; margin-top:1.5rem; margin-bottom:0.5rem;">🛠️ Actions</p>', unsafe_allow_html=True)
+    # Actions
+    st.markdown('<p style="font-weight:700; font-size:0.9rem; color:var(--text-head); margin-top:1.5rem; margin-bottom:0.5rem;">🛠️ Actions</p>', unsafe_allow_html=True)
     return props  # return so caller can use for delete logic
 
 
 def _asset_list(item):
     """Render a compact asset list matching STAC Browser."""
     assets = item.get("assets", {})
-    st.markdown('<p style="font-weight:700; font-size:1rem; color:#0f172a; margin-top:1.5rem; margin-bottom:0.5rem;">🔗 Assets</p>', unsafe_allow_html=True)
+    st.markdown('<p style="font-weight:700; font-size:1rem; color:var(--text-head); margin-top:1.5rem; margin-bottom:0.5rem;">🔗 Assets</p>', unsafe_allow_html=True)
     for key, val in assets.items():
         roles = val.get("roles", [])
         title = val.get("title") or key.capitalize()
@@ -211,7 +211,7 @@ def _asset_list(item):
         )
         with st.expander(f"**{title}**"):
             st.markdown(f"{badges}", unsafe_allow_html=True)
-            st.markdown(f'<a href="{href}" target="_blank" style="font-size:0.8rem; color:#2563eb;">Open Asset URL ↗</a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="{href}" target="_blank" style="font-size:0.8rem; color:var(--accent);">Open Asset URL ↗</a>', unsafe_allow_html=True)
 
 
 def render_items_tab() -> None:
