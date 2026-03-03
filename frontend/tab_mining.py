@@ -522,23 +522,11 @@ def _render_create_item_section() -> None:
 
     st.divider()
 
-    # ── 4 · Analytics (JSON) ──────────────────────────────────────────────────
-    st.markdown("##### 4 · Analytics Data — Paste JSON")
-    st.caption("Paste the analytics JSON for this survey. Leave blank to skip.")
-    analytics_text = st.text_area(
-        "Analytics (JSON)",
-        placeholder='{"area_ha": 12.5, "ndvi": 0.45, "disturbed_area": 8.2, ...}',
-        height=160,
-        key="mining_analytics_input",
-    )
+    # ── 3 · GeoJSON layers — File Upload ─────────────────────────────────────
+    st.markdown("##### 3 · Vector Change Layers — Upload GeoJSON Files")
+    st.caption("Upload a `.geojson` file for each layer. Leave blank to skip.")
 
-    st.divider()
-
-    # ── 3 · GeoJSON layers ────────────────────────────────────────────────────
-    st.markdown("##### 3 · Vector Change Layers — Paste GeoJSON")
-    st.caption("Paste the GeoJSON for each layer. Leave blank to skip.")
-
-    geojson_texts: dict[str, str] = {}
+    geojson_files: dict[str, object] = {}  # akey → UploadedFile or None
     keys         = list(GEOJSON_ASSETS.items())
     left_assets  = keys[: len(keys) // 2 + len(keys) % 2]
     right_assets = keys[len(keys) // 2 + len(keys) % 2 :]
@@ -546,13 +534,102 @@ def _render_create_item_section() -> None:
     col_l, col_r = st.columns(2)
     for col_widget, asset_group in [(col_l, left_assets), (col_r, right_assets)]:
         with col_widget:
-            for akey, (alabel, _) in asset_group:
-                geojson_texts[akey] = st.text_area(
+            for akey, (alabel, filename) in asset_group:
+                uploaded = st.file_uploader(
                     alabel,
-                    placeholder='{"type":"FeatureCollection","features":[...]}',
-                    height=130,
-                    key=f"mining_json_{akey}",
+                    type=["geojson", "json"],
+                    key=f"mining_gjson_{akey}",
+                    label_visibility="visible",
                 )
+                geojson_files[akey] = uploaded
+                if uploaded is not None:
+                    try:
+                        gj = json.loads(uploaded.read())
+                        uploaded.seek(0)
+                        n_feat = len(gj.get("features", []))
+                        st.markdown(
+                            f'<span style="background:#dcfce7;border:1px solid #16a34a;'
+                            f'color:#15803d;font-size:0.72rem;font-weight:700;'
+                            f'padding:2px 10px;border-radius:100px;">'
+                            f'✅ {uploaded.name} · {n_feat} feature{"s" if n_feat!=1 else ""}</span>',
+                            unsafe_allow_html=True,
+                        )
+                    except Exception:
+                        st.markdown(
+                            f'<span style="background:#fee2e2;border:1px solid #dc2626;'
+                            f'color:#dc2626;font-size:0.72rem;font-weight:700;'
+                            f'padding:2px 10px;border-radius:100px;">'
+                            f'❌ {uploaded.name} · Invalid GeoJSON</span>',
+                            unsafe_allow_html=True,
+                        )
+
+    st.divider()
+
+    # ── 4 · Analytics — Structured Form ───────────────────────────────────────
+    st.markdown("##### 4 · Analytics Data")
+    st.caption(
+        "Fill in the area statistics for each land-cover class. "
+        "This will be saved as a structured analytics JSON file."
+    )
+
+    # Fixed class rows matching the analytics schema
+    _ANALYTIC_CLASSES = [
+        "Mining Area",
+        "New Mine Pit Area",
+        "Stockpile / Dumping Area",
+        "Reclamation",
+        "Extended Land",
+        "Temporary Water Pits",
+    ]
+
+    year_label = st.text_input(
+        "Year / Survey Label",
+        value="2019",
+        placeholder="e.g. 2019  or  2026",
+        key="mining_analytics_year",
+        help="This label is used as the key in the analytics JSON (e.g. \"2019\").",
+    )
+
+    analytics_rows: list[dict] = []
+    has_analytics = False
+
+    header_cols = st.columns([3, 2, 2])
+    header_cols[0].markdown("**Land Cover Class**")
+    header_cols[1].markdown("**Area Covered (km²)**")
+    header_cols[2].markdown("**% Covered**")
+
+    for cls_name in _ANALYTIC_CLASSES:
+        row_cols = st.columns([3, 2, 2])
+        with row_cols[0]:
+            st.markdown(
+                f'<div style="padding:0.45rem 0;font-size:0.85rem;'
+                f'color:var(--text-head,#0f172a);">{cls_name}</div>',
+                unsafe_allow_html=True,
+            )
+        with row_cols[1]:
+            area_val = st.number_input(
+                f"km² {cls_name}",
+                min_value=0.0, step=0.001, format="%.3f",
+                key=f"analytics_area_{cls_name}",
+                label_visibility="collapsed",
+            )
+        with row_cols[2]:
+            pct_val = st.number_input(
+                f"% {cls_name}",
+                min_value=0.0, max_value=100.0, step=0.1, format="%.1f",
+                key=f"analytics_pct_{cls_name}",
+                label_visibility="collapsed",
+            )
+        analytics_rows.append({
+            "name": cls_name,
+            "area_covered_sq_km": {year_label: area_val},
+            "percentage_covered":  {year_label: pct_val},
+        })
+        if area_val > 0 or pct_val > 0:
+            has_analytics = True
+
+    # Build the analytics JSON string for saving
+    analytics_payload = {"structures_made": analytics_rows} if has_analytics else None
 
     st.divider()
 
@@ -573,10 +650,15 @@ def _render_create_item_section() -> None:
         errors.append("GeoTIFF is required (file path or upload).")
     if tif_meta is None and (tif_file is not None or raw_src_path is not None):
         errors.append("GeoTIFF could not be read — check the file and try again.")
-    for akey, text in geojson_texts.items():
-        valid, msg = _validate_geojson_text(akey, text)
-        if not valid:
-            errors.append(msg)
+    # Validate uploaded GeoJSON files
+    for akey, uploaded in geojson_files.items():
+        if uploaded is not None:
+            try:
+                uploaded.seek(0)
+                json.loads(uploaded.read())
+                uploaded.seek(0)
+            except Exception as _ve:
+                errors.append(f"{GEOJSON_ASSETS[akey][0]}: Invalid GeoJSON — {_ve}")
 
     if errors:
         for e in errors:
@@ -613,14 +695,13 @@ def _render_create_item_section() -> None:
 
     asset_urls["visual"] = cog_url
 
-    # Analytics asset URL (projected for both preview and save)
-    if analytics_text.strip():
+    # Analytics asset URL (projected if data entered)
+    if analytics_payload:
         asset_urls["analytics"] = local_to_url(folder / ANALYTICS_FILE)
 
-    # GeoJSON asset URLs (project the path even in preview mode)
+    # GeoJSON asset URLs (projected based on uploaded files)
     for akey, (_, filename) in GEOJSON_ASSETS.items():
-        text = geojson_texts.get(akey, "").strip()
-        if text:
+        if geojson_files.get(akey) is not None:
             asset_urls[akey] = local_to_url(folder / filename)
 
     if do_save:
@@ -676,14 +757,17 @@ def _render_create_item_section() -> None:
             asset_urls["preview"] = preview_tiler_url
 
         # ── 5. Save Analytics JSON ──────────────────────────────────────────
-        if analytics_text.strip():
-            (folder / ANALYTICS_FILE).write_text(analytics_text.strip(), encoding="utf-8")
+        if analytics_payload:
+            (folder / ANALYTICS_FILE).write_text(
+                json.dumps(analytics_payload, indent=2), encoding="utf-8"
+            )
 
         # ── 6. Save GeoJSONs ─────────────────────────────────────────────────
         for akey, (_, filename) in GEOJSON_ASSETS.items():
-            text = geojson_texts.get(akey, "").strip()
-            if text:
-                (folder / filename).write_text(text, encoding="utf-8")
+            uploaded = geojson_files.get(akey)
+            if uploaded is not None:
+                uploaded.seek(0)
+                (folder / filename).write_bytes(uploaded.read())
 
     # Add tile + preview URLs to asset_urls (for both preview and save)
     tile_url = build_tile_url(cog_url, bidx_qs, rescale)
