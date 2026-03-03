@@ -991,18 +991,51 @@ def _render_browse_items_section() -> None:
         col   = STATUS_COLORS.get(st8, "#64748b")
 
         with st.expander(f"🪨  {loc}  ·  `{iid}`  ·  {dt}"):
-            lc, rc = st.columns([3, 2])
+            assets = item.get("assets", {})
+            preview_href = assets.get("preview", {}).get("href", "")
 
-            with lc:
-                st.markdown(
-                    f"**Location:** {loc}<br>"
-                    f"**Region ID:** {props.get('region_id','—')}<br>"
-                    f"**Survey Date:** {dt}",
-                    unsafe_allow_html=True,
+            img_col, meta_col = st.columns([2, 3])
+
+            with img_col:
+                if preview_href:
+                    try:
+                        st.image(preview_href, caption=iid, use_container_width=True)
+                    except Exception:
+                        st.markdown(
+                            f'<div style="background:#f1f5f9;border-radius:8px;'
+                            f'height:120px;display:flex;align-items:center;'
+                            f'justify-content:center;color:#94a3b8;font-size:0.8rem;">'
+                            f'🖼️ Preview unavailable</div>',
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.markdown(
+                        '<div style="background:#f1f5f9;border-radius:8px;'
+                        'height:120px;display:flex;align-items:center;'
+                        'justify-content:center;color:#94a3b8;font-size:0.8rem;">'
+                        '📷 No preview</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            with meta_col:
+                gsd  = props.get("gsd", "")
+                epsg = props.get("proj:epsg", "")
+                bands = props.get("eo:bands", [])
+                band_names = " · ".join(b.get("common_name", b.get("name", "")) for b in bands) if bands else ""
+
+                meta_html = (
+                    f"<b>Location:</b> {loc}<br>"
+                    f"<b>Region ID:</b> {props.get('region_id', '—')}<br>"
+                    f"<b>Survey Date:</b> {dt}<br>"
                 )
+                if gsd:
+                    meta_html += f"<b>GSD:</b> {gsd} m<br>"
+                if epsg:
+                    meta_html += f"<b>EPSG:</b> {epsg}<br>"
+                if band_names:
+                    meta_html += f"<b>Bands:</b> {band_names}<br>"
+                st.markdown(meta_html, unsafe_allow_html=True)
 
-            with rc:
-                assets = item.get("assets", {})
                 if assets:
                     st.markdown("**Assets:**")
                     for akey, aval in assets.items():
