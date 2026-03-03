@@ -328,7 +328,7 @@ def _render_collections_section() -> None:
                 with bc1:
                     if st.button("Browse Items →",
                                  key=f"mine_browse_{cid}",
-                                 use_container_width=True):
+                                 width="stretch"):
                         st.session_state["mining_selected_col"] = cid
                         st.session_state["mining_active_tab"] = 2
                         st.rerun()
@@ -805,10 +805,10 @@ def _render_create_item_section() -> None:
     # ── Actions ───────────────────────────────────────────────────────────────
     pc, sc = st.columns(2)
     with pc:
-        do_preview = st.button("👁️ Preview STAC JSON", use_container_width=True)
+        do_preview = st.button("👁️ Preview STAC JSON", width="stretch")
     with sc:
         do_save = st.button("💾 Save & Push to STAC API",
-                            type="primary", use_container_width=True)
+                            type="primary", width="stretch")
 
     if not (do_preview or do_save):
         return
@@ -1026,7 +1026,7 @@ def _render_browse_items_section() -> None:
             with img_col:
                 if preview_href:
                     try:
-                        st.image(preview_href, caption=iid, use_container_width=True)
+                        st.image(preview_href, caption=iid, width="stretch")
                     except Exception:
                         st.markdown(
                             f'<div style="background:#f1f5f9;border-radius:8px;'
