@@ -582,12 +582,16 @@ def _render_create_item_section() -> None:
         "Temporary Water Pits",
     ]
 
+    import re as _re
+    _yr_match = _re.search(r'\b(19|20)\d{2}\b', item_id_auto) if item_id_auto else None
+    _auto_year = _yr_match.group() if _yr_match else str(datetime.now(tz=timezone.utc).year)
+
     year_label = st.text_input(
         "Year / Survey Label",
-        value="2019",
+        value=_auto_year,
         placeholder="e.g. 2019  or  2026",
         key="mining_analytics_year",
-        help="This label is used as the key in the analytics JSON (e.g. \"2019\").",
+        help="Auto-detected from the image filename. Edit if needed.",
     )
 
     analytics_rows: list[dict] = []
