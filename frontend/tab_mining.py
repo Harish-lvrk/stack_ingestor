@@ -215,15 +215,77 @@ def _badge(text: str, color: str) -> str:
     )
 
 
-def _validate_geojson_text(key: str, text: str) -> tuple[bool, str]:
-    """Return (is_valid, error_message). Empty text is considered valid (optional)."""
-    if not text.strip():
-        return True, ""
+def _validate_geojson_bytes(key: str, data: bytes) -> tuple[bool, str]:
+    """Validate GeoJSON bytes from an uploaded file. Returns (is_valid, error_message)."""
     try:
-        json.loads(text)
+        json.loads(data)
         return True, ""
     except json.JSONDecodeError as e:
-        return False, f"{key}: Invalid JSON — {e}"
+        return False, f"{key}: Invalid GeoJSON — {e}"
+
+
+def _extract_image_date(cog_path: Path, filename_stem: str) -> tuple[str, str]:
+    """Try to extract acquisition date from rasterio tags or filename.
+
+    Returns (iso_datetime_str, source_hint) where source_hint explains how the
+    date was found, e.g. 'EXIF metadata', 'filename', or 'today (fallback)'.
+    """
+    import re as _re
+    # 1. Try rasterio TIFF tags
+    try:
+        import rasterio
+        with rasterio.open(cog_path) as src:
+            tags = src.tags()
+            raw = (
+                tags.get("TIFFTAG_DATETIME") or
+                tags.get("ACQUISITIONDATETIME") or
+                tags.get("acquisition_date") or
+                tags.get("date") or
+                tags.get("datetime") or
+                ""
+            )
+        if raw:
+            # Common format: "YYYY:MM:DD HH:MM:SS"
+            raw = raw.replace(":", "-", 2).replace(" ", "T")[:19]
+            dt = datetime.fromisoformat(raw)
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ"), "EXIF metadata"
+    except Exception:
+        pass
+
+    # 2. Try filename for a 4-digit year
+    match = _re.search(r'\b(19|20)(\d{2})\b', filename_stem)
+    if match:
+        year = match.group()
+        return f"{year}-01-01T00:00:00Z", f"filename ({filename_stem})"
+
+    # 3. Fallback to today
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "today (fallback)"
+
+
+def _compute_rescale_local(cog_path: Path, bidx: list[int]) -> str:
+    """Compute per-band p2/p98 rescale directly from a local COG file using rasterio.
+
+    Returns the rescale string in TiTiler format, e.g.
+    'rescale=100,2500&rescale=120,2400&rescale=90,2300'
+    """
+    try:
+        import numpy as np
+        import rasterio
+        parts = []
+        with rasterio.open(cog_path) as src:
+            for b in bidx:
+                data = src.read(b).astype(float)
+                valid = data[data > 0]          # exclude nodata (0)
+                if valid.size == 0:
+                    parts.append("0,255")
+                    continue
+                p2  = int(np.percentile(valid, 2))
+                p98 = int(np.percentile(valid, 98))
+                parts.append(f"{p2},{p98}")
+        return "&".join(f"rescale={r}" for r in parts)
+    except Exception:
+        # Safe fallback
+        return "&".join(f"rescale=0,255" for _ in bidx)
 
 
 # ── Section 1: Collections browser + create ────────────────────────────────────
@@ -520,6 +582,30 @@ def _render_create_item_section() -> None:
                         f"**EPSG:** {tif_meta['epsg']}"
                     )
 
+    # ── Survey date picker (shown as soon as COG is ready) ────────────────────
+    if tif_meta is not None and cog_tmp_path is not None:
+        st.divider()
+        _auto_dt_str, _dt_source = _extract_image_date(cog_tmp_path, item_id_auto)
+        _auto_date = datetime.fromisoformat(_auto_dt_str.replace("Z", "+00:00")).date()
+
+        st.markdown("##### 🗓️ Survey Date")
+        st.caption(
+            f"Detected from **{_dt_source}**. Edit if the auto-detected date is wrong."
+        )
+        _user_date = st.date_input(
+            "Survey Date *",
+            value=_auto_date,
+            key="mining_survey_date",
+            label_visibility="visible",
+        )
+        # Store confirmed ISO datetime back in session state for use at save time
+        st.session_state["_mining_confirmed_dt"] = (
+            datetime(_user_date.year, _user_date.month, _user_date.day,
+                     tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+    else:
+        st.session_state.pop("_mining_confirmed_dt", None)
+
     st.divider()
 
     # ── 3 · GeoJSON layers — File Upload ─────────────────────────────────────
@@ -654,15 +740,14 @@ def _render_create_item_section() -> None:
         errors.append("GeoTIFF is required (file path or upload).")
     if tif_meta is None and (tif_file is not None or raw_src_path is not None):
         errors.append("GeoTIFF could not be read — check the file and try again.")
-    # Validate uploaded GeoJSON files
+    # Validate uploaded GeoJSON files using _validate_geojson_bytes
     for akey, uploaded in geojson_files.items():
         if uploaded is not None:
-            try:
-                uploaded.seek(0)
-                json.loads(uploaded.read())
-                uploaded.seek(0)
-            except Exception as _ve:
-                errors.append(f"{GEOJSON_ASSETS[akey][0]}: Invalid GeoJSON — {_ve}")
+            uploaded.seek(0)
+            valid, msg = _validate_geojson_bytes(GEOJSON_ASSETS[akey][0], uploaded.read())
+            uploaded.seek(0)
+            if not valid:
+                errors.append(msg)
 
     if errors:
         for e in errors:
@@ -671,7 +756,11 @@ def _render_create_item_section() -> None:
 
     # ── Compute paths ──────────────────────────────────────────────────────────
     iid_clean  = item_id_auto.replace(" ", "-")
-    dt_str     = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Use user-confirmed date from the survey date picker (set above after COG ready)
+    dt_str = st.session_state.get(
+        "_mining_confirmed_dt",
+        datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
     bbox       = tif_meta["bbox"]
     geometry   = tif_meta["geometry"]
     band_count = tif_meta["band_count"]
@@ -690,12 +779,13 @@ def _render_create_item_section() -> None:
     # ── Build asset_urls ───────────────────────────────────────────────────────
     asset_urls: dict[str, str] = {}
 
-    # For preview mode: use default rescale (COG not on server yet)
-    if do_preview:
-        rescale = "0,255"
-    else:
-        # Fetch real stats from TiTiler (COG will be on server after copy below)
-        rescale = "0,255"   # filled in after COG is saved
+    # Compute rescale from temp COG (accurate for both preview and save modes).
+    # In save mode this is later overridden by TiTiler stats for the final server copy.
+    rescale = (
+        _compute_rescale_local(cog_tmp_path, bidx)
+        if cog_tmp_path and cog_tmp_path.exists()
+        else "&".join(f"rescale=0,255" for _ in bidx)
+    )
 
     asset_urls["visual"] = cog_url
 
