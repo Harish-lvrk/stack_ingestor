@@ -978,7 +978,7 @@ def _render_create_item_section() -> None:
             f"📁 `{folder}`  \n"
             f"Files: `{iid_clean}.tif`, `{iid_clean}_cog.tif`, `preview.png`, GeoJSONs"
         )
-        st.balloons()
+        st.toast(f"✅ Survey item **{iid_clean}** saved!", icon="⛏️")
     else:
         st.error(f"❌ Files saved but API push failed: {err}")
 
@@ -986,7 +986,7 @@ def _render_create_item_section() -> None:
 # ── Section 3: Browse items ────────────────────────────────────────────────────
 
 def _render_browse_items_section() -> None:
-    mining_col_ids = _mining_collection_ids()
+    mining_col_ids = _mining_collection_ids()l
     selected_col   = st.session_state.get("mining_selected_col")
 
     if not mining_col_ids:
