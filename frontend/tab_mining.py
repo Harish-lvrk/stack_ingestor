@@ -1182,15 +1182,32 @@ def _render_browse_items_section() -> None:
                     _col_info, _col_up = st.columns([2, 3])
                     with _col_info:
                         if _exists:
-                            _sz = _apath.stat().st_size
+                            _sz    = _apath.stat().st_size
+                            _mtime = datetime.fromtimestamp(
+                                _apath.stat().st_mtime, tz=timezone.utc
+                            ).strftime("%Y-%m-%d %H:%M UTC")
+                            try:
+                                _gj_data  = json.loads(_apath.read_bytes())
+                                _n_f      = len(_gj_data.get("features", []))
+                                _feat_str = f" · <b>{_n_f} features</b>"
+                            except Exception:
+                                _gj_data  = None
+                                _feat_str = ""
                             st.markdown(
-                                f'<div style="font-size:0.8rem;padding:0.3rem 0;">'
+                                f'<div style="font-size:0.8rem;padding:0.2rem 0;">'
                                 f'✅ <b>{_alabel}</b><br>'
-                                f'<code style="font-size:0.68rem;color:#64748b;">{_apath}</code><br>'
-                                f'<span style="color:#64748b;font-size:0.7rem;">{_sz/1024:.1f} KB</span>'
+                                f'<code style="font-size:0.67rem;color:#64748b;">{_apath.name}</code><br>'
+                                f'<span style="color:#64748b;font-size:0.7rem;">'
+                                f'{_sz/1024:.1f} KB{_feat_str}<br>'
+                                f'🕒 saved {_mtime}</span>'
                                 f'</div>',
                                 unsafe_allow_html=True,
                             )
+                            with st.expander(f"👁️ View {_alabel} content"):
+                                if _gj_data is not None:
+                                    st.json(_gj_data)
+                                else:
+                                    st.warning("Could not parse as GeoJSON.")
                         else:
                             st.markdown(
                                 f'<div style="font-size:0.8rem;padding:0.3rem 0;color:#94a3b8;">'
@@ -1208,13 +1225,13 @@ def _render_browse_items_section() -> None:
                         if _uf is not None:
                             try:
                                 _uf.seek(0)
-                                _gj_data = json.loads(_uf.read())
+                                _gj_staged = json.loads(_uf.read())
                                 _uf.seek(0)
-                                _n_feat = len(_gj_data.get("features", []))
+                                _n_feat = len(_gj_staged.get("features", []))
                                 st.markdown(
                                     f'<span style="background:#dcfce7;border:1px solid #16a34a;'
                                     f'color:#15803d;font-size:0.7rem;font-weight:700;'
-                                    f'padding:1px 8px;border-radius:100px;">✅ {_uf.name} · {_n_feat} features</span>',
+                                    f'padding:1px 8px;border-radius:100px;">✅ {_uf.name} · {_n_feat} features — will replace on Save</span>',
                                     unsafe_allow_html=True,
                                 )
                             except Exception:
