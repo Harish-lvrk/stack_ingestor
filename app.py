@@ -16,6 +16,7 @@ from frontend.status_bar import render_status_bar
 from frontend.tab_ingest import render_ingest_tab
 from frontend.tab_collections import render_collections_tab
 from frontend.tab_items import render_items_tab
+from frontend.tab_mining import render_mining_tab
 
 # ── Page config (must be first Streamlit call) ────────────────────────────────
 st.set_page_config(
@@ -73,8 +74,8 @@ render_status_bar()
 st.divider()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_ingest, tab_collections, tab_items = st.tabs(
-    ["🛰️  Ingest", "📦  Collections", "📋  Items"]
+tab_ingest, tab_collections, tab_items, tab_mining = st.tabs(
+    ["🛰️  Ingest", "📦  Collections", "📋  Items", "⛏️  Mining Manager"]
 )
 
 with tab_ingest:
@@ -85,3 +86,6 @@ with tab_collections:
 
 with tab_items:
     render_items_tab()
+
+with tab_mining:
+    render_mining_tab()

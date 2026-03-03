@@ -27,36 +27,30 @@ def fetch_titiler_stats(file_url: str) -> dict:
 
 
 def compute_rescale(stats: dict, band_indices: list[int]) -> str:
-    """Return a TiTiler-compatible per-band rescale string.
-
-    For each band in band_indices, appends 'min,max' joined by '&rescale='.
-    Single rescale pair → same as before but correct when one band.
-    Multi-band → per-band normalization, much better visual contrast.
-    """
+    """Compute rescale string (min,max) from Titiler band stats."""
     if not stats:
         return "0,255"
-    parts = []
+    lo, hi = [], []
     for i in band_indices:
         key = f"b{i}"
         if key in stats:
-            b  = stats[key]
-            lo = b.get("percentile_2",  b.get("min", 0))
-            hi = b.get("percentile_98", b.get("max", 255))
-            parts.append(f"{int(lo)},{int(hi)}")
-    if parts:
-        return "&rescale=".join(parts)
+            b = stats[key]
+            lo.append(b.get("percentile_2",  b.get("min", 0)))
+            hi.append(b.get("percentile_98", b.get("max", 255)))
+    if lo and hi:
+        return f"{int(min(lo))},{int(max(hi))}"
     return "0,255"
 
 
 def build_tile_url(file_url: str, bidx_qs: str, rescale: str) -> str:
     return (
         f"{TITILER_URL}/cog/{TILE_MATRIX_SET}/tilejson.json"
-        f"?url={file_url}&{bidx_qs}&rescale={rescale}&nodata=0"
+        f"?url={file_url}&{bidx_qs}&rescale={rescale}"
     )
 
 
 def build_preview_url(file_url: str, bidx_qs: str, rescale: str) -> str:
     return (
         f"{TITILER_URL}/cog/preview.png"
-        f"?url={file_url}&{bidx_qs}&rescale={rescale}&nodata=0"
+        f"?url={file_url}&{bidx_qs}&rescale={rescale}"
     )
