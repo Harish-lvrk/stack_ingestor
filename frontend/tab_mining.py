@@ -38,8 +38,11 @@ from backend.stac_api import (
     api_delete_collection,
     api_delete_item,
     api_push_item,
+    api_update_collection,
+    api_update_item,
     build_collection_payload,
     fetch_collections,
+    fetch_item,
     fetch_items,
     local_to_url,
 )
@@ -321,7 +324,7 @@ def _render_collections_section() -> None:
                 </div>
                 """, unsafe_allow_html=True)
 
-                bc1, bc2 = st.columns([3, 1])
+                bc1, bc2, bc3 = st.columns([3, 1, 1])
                 with bc1:
                     if st.button("Browse Items →",
                                  key=f"mine_browse_{cid}",
@@ -330,10 +333,59 @@ def _render_collections_section() -> None:
                         st.session_state["mining_active_tab"] = 2
                         st.rerun()
                 with bc2:
+                    if st.button("✏️", key=f"mine_edit_col_{cid}",
+                                 help=f"Edit {cid}"):
+                        st.session_state[f"mine_editing_col_{cid}"] = not st.session_state.get(f"mine_editing_col_{cid}", False)
+                with bc3:
                     if st.button("🗑️", key=f"mine_del_col_{cid}",
                                  help=f"Delete {cid}"):
                         st.session_state[f"mine_confirm_del_col_{cid}"] = True
 
+                # ─ Edit Collection form ─────────────────────────────────────
+                if st.session_state.get(f"mine_editing_col_{cid}"):
+                    with st.form(key=f"edit_col_form_{cid}"):
+                        st.markdown(f"**✏️ Edit Mining Area: `{cid}`**")
+                        new_title = st.text_input(
+                            "Area Name", value=col.get("title", cid),
+                            key=f"edit_col_title_{cid}"
+                        )
+                        new_desc = st.text_area(
+                            "Description", value=col.get("description", ""),
+                            height=80, key=f"edit_col_desc_{cid}"
+                        )
+                        new_lic = st.selectbox(
+                            "License",
+                            ["proprietary", "various", "CC-BY-4.0", "ODbL-1.0"],
+                            index=["proprietary", "various", "CC-BY-4.0", "ODbL-1.0"].index(
+                                col.get("license", "proprietary")
+                            ) if col.get("license") in ["proprietary", "various", "CC-BY-4.0", "ODbL-1.0"] else 0,
+                            key=f"edit_col_lic_{cid}"
+                        )
+                        cancel_col, save_col = st.columns(2)
+                        with cancel_col:
+                            cancelled = st.form_submit_button("❌ Cancel")
+                        with save_col:
+                            saved = st.form_submit_button("✅ Save Changes", type="primary")
+
+                    if cancelled:
+                        del st.session_state[f"mine_editing_col_{cid}"]
+                        st.rerun()
+                    if saved:
+                        # Preserve original created timestamp
+                        orig_created = col.get("created")
+                        payload = build_collection_payload(
+                            cid, new_title, new_desc, new_lic,
+                            created=orig_created
+                        )
+                        ok, err = api_update_collection(cid, payload)
+                        if ok:
+                            st.success(f"✅ Mining area **{cid}** updated!")
+                            del st.session_state[f"mine_editing_col_{cid}"]
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {err}")
+
+                # ─ Delete confirmation ───────────────────────────────────────
                 if st.session_state.get(f"mine_confirm_del_col_{cid}"):
                     st.warning(f"Delete **{cid}**?")
                     y, n = st.columns(2)
@@ -959,17 +1011,153 @@ def _render_browse_items_section() -> None:
                         st.markdown(f"- [{atitle}]({href})")
 
             st.markdown("")
-            r1, r2 = st.columns(2)
+            r1, r2, r3 = st.columns(3)
             with r1:
                 with st.expander("📄 Raw STAC JSON"):
                     st.json(item)
             with r2:
+                if st.button(f"✏️ Edit `{iid}`", key=f"mine_edit_{iid}"):
+                    st.session_state[f"mine_editing_{iid}"] = not st.session_state.get(f"mine_editing_{iid}", False)
+            with r3:
                 if st.button(f"🗑️ Delete `{iid}`", key=f"mine_del_{iid}"):
                     st.session_state[f"mine_del_confirm_{iid}"] = True
 
-            if st.session_state.get(f"mine_del_confirm_{iid}"):
-                st.warning("Permanently delete this item?")
-                y, n = st.columns(2)
+            # ─ Edit Item form ────────────────────────────────────────────
+            if st.session_state.get(f"mine_editing_{iid}"):
+                st.markdown(f"**✏️ Editing item `{iid}`**")
+
+                # Pre-fill date from existing STAC datetime
+                _cur_dt_str = props.get("datetime", "")
+                try:
+                    _cur_date = datetime.fromisoformat(
+                        _cur_dt_str.replace("Z", "+00:00")
+                    ).date()
+                except Exception:
+                    _cur_date = datetime.now(tz=timezone.utc).date()
+
+                _edit_date = st.date_input(
+                    "🗓️ Survey Date",
+                    value=_cur_date,
+                    key=f"edit_date_{iid}",
+                )
+
+                # Analytics editor — pre-fill from existing analytics.json if present
+                st.markdown("**Analytics Data** (leave at 0 to keep unchanged)")
+                _EDIT_CLASSES = [
+                    "Mining Area", "New Mine Pit Area", "Stockpile / Dumping Area",
+                    "Reclamation", "Extended Land", "Temporary Water Pits",
+                ]
+
+                # Try to load existing analytics.json for pre-fill
+                _analytics_folder = MINING_ROOT / picked / iid
+                _existing_analytics: dict = {}
+                _analytics_path = _analytics_folder / ANALYTICS_FILE
+                if _analytics_path.exists():
+                    try:
+                        _raw = json.loads(_analytics_path.read_text())
+                        for row in _raw.get("structures_made", []):
+                            _existing_analytics[row["name"]] = row
+                    except Exception:
+                        pass
+
+                _year_key = list((
+                    _existing_analytics.get(_EDIT_CLASSES[0], {})
+                    .get("area_covered_sq_km", {"2019": 0})
+                ).keys())[0] if _existing_analytics else "2019"
+
+                _edit_year = st.text_input(
+                    "Year Label", value=_year_key, key=f"edit_year_{iid}"
+                )
+
+                _hdr = st.columns([3, 2, 2])
+                _hdr[0].markdown("**Land Cover Class**")
+                _hdr[1].markdown("**Area (km²)**")
+                _hdr[2].markdown("**% Covered**")
+
+                _edit_rows: list[dict] = []
+                _edit_has_data = False
+                for _cls in _EDIT_CLASSES:
+                    _prev = _existing_analytics.get(_cls, {})
+                    _prev_area = float(
+                        list(_prev.get("area_covered_sq_km", {"_": 0}).values())[0]
+                    ) if _prev else 0.0
+                    _prev_pct = float(
+                        list(_prev.get("percentage_covered", {"_": 0}).values())[0]
+                    ) if _prev else 0.0
+
+                    _rc = st.columns([3, 2, 2])
+                    with _rc[0]:
+                        st.markdown(
+                            f'<div style="padding:0.4rem 0;font-size:0.85rem;">{_cls}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with _rc[1]:
+                        _area = st.number_input(
+                            f"area {_cls}", value=_prev_area,
+                            min_value=0.0, step=0.001, format="%.3f",
+                            key=f"edit_area_{iid}_{_cls}",
+                            label_visibility="collapsed",
+                        )
+                    with _rc[2]:
+                        _pct = st.number_input(
+                            f"pct {_cls}", value=_prev_pct,
+                            min_value=0.0, max_value=100.0, step=0.1, format="%.1f",
+                            key=f"edit_pct_{iid}_{_cls}",
+                            label_visibility="collapsed",
+                        )
+                    _edit_rows.append({
+                        "name": _cls,
+                        "area_covered_sq_km": {_edit_year: _area},
+                        "percentage_covered":  {_edit_year: _pct},
+                    })
+                    if _area > 0 or _pct > 0:
+                        _edit_has_data = True
+
+                _cancel_edit, _save_edit = st.columns(2)
+                with _cancel_edit:
+                    if st.button("❌ Cancel", key=f"edit_cancel_{iid}"):
+                        del st.session_state[f"mine_editing_{iid}"]
+                        st.rerun()
+                with _save_edit:
+                    if st.button("✅ Save Changes", key=f"edit_save_{iid}", type="primary"):
+                        # 1. Fetch current item from STAC API
+                        _current = fetch_item(picked, iid)
+                        if _current is None:
+                            st.error("❌ Could not fetch current item from STAC API.")
+                        else:
+                            # 2. Update properties
+                            _new_dt = datetime(
+                                _edit_date.year, _edit_date.month, _edit_date.day,
+                                tzinfo=timezone.utc
+                            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                            _current["properties"]["datetime"] = _new_dt
+
+                            # 3. Save updated analytics.json to disk
+                            if _edit_has_data:
+                                _analytics_folder.mkdir(parents=True, exist_ok=True)
+                                _analytics_path.write_text(
+                                    json.dumps({"structures_made": _edit_rows}, indent=2),
+                                    encoding="utf-8"
+                                )
+                                # Make sure analytics asset is in the item
+                                if "analytics" not in _current.get("assets", {}):
+                                    _current.setdefault("assets", {})["analytics"] = {
+                                        "href":  local_to_url(_analytics_path),
+                                        "type":  "application/json",
+                                        "roles": ["data", "analytics"],
+                                        "title": "Analytics Data",
+                                    }
+
+                            # 4. PUT updated item to STAC API
+                            ok, err = api_update_item(picked, iid, _current)
+                            if ok:
+                                st.success(f"✅ Item **{iid}** updated!")
+                                del st.session_state[f"mine_editing_{iid}"]
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {err}")
+
+            # ─ Delete confirmation ───────────────────────────────────────
                 with y:
                     if st.button("✅ Yes", key=f"mine_del_yes_{iid}"):
                         ok, err = api_delete_item(picked, iid)

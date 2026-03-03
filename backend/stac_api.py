@@ -1,6 +1,7 @@
 """backend/stac_api.py — STAC API + file-server helpers with structured logging."""
 
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -81,8 +82,16 @@ def fetch_collection_ids() -> list[str]:
     return sorted(c["id"] for c in fetch_collections() if "id" in c)
 
 
-def build_collection_payload(col_id: str, title: str,
-                              description: str, license_: str) -> dict:
+def build_collection_payload(
+    col_id: str, title: str, description: str, license_: str,
+    created: str | None = None,
+) -> dict:
+    """Build a STAC Collection payload.
+
+    `created` is an ISO datetime string.  If not provided, the current UTC time
+    is used.  The `updated` field is always set to now.
+    """
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
         "type":         "Collection",
         "id":           col_id,
@@ -90,6 +99,8 @@ def build_collection_payload(col_id: str, title: str,
         "title":        title or col_id,
         "description":  description or col_id,
         "license":      license_,
+        "created":      created or now,
+        "updated":      now,
         "links":        [],
         "extent": {
             "spatial":  {"bbox": [[-180.0, -90.0, 180.0, 90.0]]},
@@ -149,6 +160,18 @@ def fetch_items(col_id: str, limit: int = 200) -> list[dict]:
     return []
 
 
+def fetch_item(col_id: str, item_id: str) -> dict | None:
+    """Fetch a single item from the STAC API. Returns None on failure."""
+    try:
+        r = _get(f"/collections/{col_id}/items/{item_id}")
+        if r.status_code == 200:
+            return r.json()
+        log.warning("fetch_item %s/%s → HTTP %d", col_id, item_id, r.status_code)
+    except Exception as exc:
+        log.error("fetch_item error: %s", exc)
+    return None
+
+
 def api_push_item(col_id: str, item: dict) -> tuple[bool, str]:
     try:
         r = _post(f"/collections/{col_id}/items", item)
@@ -160,6 +183,19 @@ def api_push_item(col_id: str, item: dict) -> tuple[bool, str]:
         return False, f"HTTP {r.status_code}: {r.text[:300]}"
     except Exception as exc:
         log.error("api_push_item error: %s", exc)
+        return False, str(exc)
+
+
+def api_update_item(col_id: str, item_id: str, item: dict) -> tuple[bool, str]:
+    """Update an existing STAC item via PUT."""
+    try:
+        r = _put(f"/collections/{col_id}/items/{item_id}", item)
+        if r.status_code in (200, 201, 204):
+            log.info("Item updated: %s in %s", item_id, col_id)
+            return True, ""
+        return False, f"HTTP {r.status_code}: {r.text[:300]}"
+    except Exception as exc:
+        log.error("api_update_item error: %s", exc)
         return False, str(exc)
 
 
