@@ -986,7 +986,7 @@ def _render_create_item_section() -> None:
 # ── Section 3: Browse items ────────────────────────────────────────────────────
 
 def _render_browse_items_section() -> None:
-    mining_col_ids = _mining_collection_ids()l
+    mining_col_ids = _mining_collection_ids()
     selected_col   = st.session_state.get("mining_selected_col")
 
     if not mining_col_ids:
