@@ -227,6 +227,47 @@ def _validate_geojson_bytes(key: str, data: bytes) -> tuple[bool, str]:
         return False, f"{key}: Invalid GeoJSON — {e}"
 
 
+def _geojson_area_km2(geojson_bytes: bytes) -> float:
+    """Calculate total geodesic area of all features in a GeoJSON file (km²).
+
+    Uses pyproj.Geod on WGS84 ellipsoid — accurate for any polygon size.
+    Handles Polygon and MultiPolygon geometries, including holes.
+    Returns 0.0 on any error.
+    """
+    try:
+        from pyproj import Geod
+        geod = Geod(ellps="WGS84")
+        gj   = json.loads(geojson_bytes)
+        features = gj.get("features", [])
+        total_m2 = 0.0
+
+        def _ring_area(ring: list) -> float:
+            lons = [pt[0] for pt in ring]
+            lats = [pt[1] for pt in ring]
+            area, _ = geod.polygon_area_perimeter(lons, lats)
+            return abs(area)
+
+        for feat in features:
+            geom  = feat.get("geometry") or {}
+            gtype = geom.get("type", "")
+            coords = geom.get("coordinates", [])
+
+            if gtype == "Polygon":
+                total_m2 += _ring_area(coords[0])              # exterior
+                for hole in coords[1:]:                        # subtract holes
+                    total_m2 -= _ring_area(hole)
+
+            elif gtype == "MultiPolygon":
+                for poly in coords:
+                    total_m2 += _ring_area(poly[0])            # exterior
+                    for hole in poly[1:]:                      # subtract holes
+                        total_m2 -= _ring_area(hole)
+
+        return max(total_m2, 0.0) / 1_000_000                 # m² → km²
+    except Exception:
+        return 0.0
+
+
 def _extract_image_date(cog_path: Path, filename_stem: str) -> tuple[str, str]:
     """Try to extract acquisition date from rasterio tags or filename.
 
@@ -696,6 +737,11 @@ def _render_create_item_section() -> None:
     left_assets  = keys[: len(keys) // 2 + len(keys) % 2]
     right_assets = keys[len(keys) // 2 + len(keys) % 2 :]
 
+    # session_state key for per-item computed areas: {akey: km2}
+    _area_sk = f"_gj_areas_{item_id_auto or 'new'}"
+    if _area_sk not in st.session_state:
+        st.session_state[_area_sk] = {}
+
     col_l, col_r = st.columns(2)
     for col_widget, asset_group in [(col_l, left_assets), (col_r, right_assets)]:
         with col_widget:
@@ -709,17 +755,22 @@ def _render_create_item_section() -> None:
                 geojson_files[akey] = uploaded
                 if uploaded is not None:
                     try:
-                        gj = json.loads(uploaded.read())
+                        raw = uploaded.read()
                         uploaded.seek(0)
-                        n_feat = len(gj.get("features", []))
+                        gj      = json.loads(raw)
+                        n_feat  = len(gj.get("features", []))
+                        area_km2 = _geojson_area_km2(raw)
+                        # Store computed area for use in analytics form below
+                        st.session_state[_area_sk][akey] = area_km2
                         st.markdown(
                             f'<span style="background:#dcfce7;border:1px solid #16a34a;'
                             f'color:#15803d;font-size:0.72rem;font-weight:700;'
                             f'padding:2px 10px;border-radius:100px;">'
-                            f'✅ {uploaded.name} · {n_feat} feature{"s" if n_feat!=1 else ""}</span>',
+                            f'✅ {uploaded.name} · {n_feat} feature{"s" if n_feat!=1 else ""} · <b>{area_km2:.4f} km²</b></span>',
                             unsafe_allow_html=True,
                         )
                     except Exception:
+                        st.session_state[_area_sk].pop(akey, None)
                         st.markdown(
                             f'<span style="background:#fee2e2;border:1px solid #dc2626;'
                             f'color:#dc2626;font-size:0.72rem;font-weight:700;'
@@ -727,6 +778,9 @@ def _render_create_item_section() -> None:
                             f'❌ {uploaded.name} · Invalid GeoJSON</span>',
                             unsafe_allow_html=True,
                         )
+                else:
+                    # Clear cached area if file was removed
+                    st.session_state[_area_sk].pop(akey, None)
 
     st.divider()
 
@@ -759,6 +813,31 @@ def _render_create_item_section() -> None:
         help="Auto-detected from the image filename. Edit if needed.",
     )
 
+    # Map GeoJSON asset key -> analytics class name for auto-fill
+    _AKEY_TO_CLASS: dict[str, str] = {
+        "boundary":   None,                    # boundary = total area, used as denominator
+        "mining_area":  "Mining Area",
+        "new_mine_pit": "New Mine Pit Area",
+        "stockpile":    "Stockpile / Dumping Area",
+        "reclamation":  "Reclamation",
+        "haul_roads":   None,                  # no direct analytics class for haul roads
+        "water_pits":   "Temporary Water Pits",
+    }
+
+    _computed_areas = st.session_state.get(_area_sk, {})
+    _boundary_km2   = _computed_areas.get("boundary", 0.0)
+    has_auto_fill   = any(
+        _computed_areas.get(k, 0.0) > 0
+        for k, cls in _AKEY_TO_CLASS.items() if cls
+    )
+
+    if has_auto_fill:
+        st.caption(
+            "🧠 **Areas auto-calculated from uploaded GeoJSON polygons.**"
+            + (f" Boundary total = **{_boundary_km2:.4f} km²**." if _boundary_km2 > 0 else "")
+            + " Values are editable."
+        )
+
     analytics_rows: list[dict] = []
     has_analytics = False
 
@@ -768,6 +847,15 @@ def _render_create_item_section() -> None:
     header_cols[2].markdown("**% Covered**")
 
     for cls_name in _ANALYTIC_CLASSES:
+        # Find the akey whose class matches this row
+        auto_area = 0.0
+        for akey, mapped_cls in _AKEY_TO_CLASS.items():
+            if mapped_cls == cls_name:
+                auto_area = _computed_areas.get(akey, 0.0)
+                break
+
+        auto_pct = round((auto_area / _boundary_km2 * 100), 2) if (_boundary_km2 > 0 and auto_area > 0) else 0.0
+
         row_cols = st.columns([3, 2, 2])
         with row_cols[0]:
             st.markdown(
@@ -778,14 +866,16 @@ def _render_create_item_section() -> None:
         with row_cols[1]:
             area_val = st.number_input(
                 f"km² {cls_name}",
-                min_value=0.0, step=0.001, format="%.3f",
+                value=round(auto_area, 4),
+                min_value=0.0, step=0.001, format="%.4f",
                 key=f"analytics_area_{cls_name}",
                 label_visibility="collapsed",
             )
         with row_cols[2]:
             pct_val = st.number_input(
                 f"% {cls_name}",
-                min_value=0.0, max_value=100.0, step=0.1, format="%.1f",
+                value=round(auto_pct, 2),
+                min_value=0.0, max_value=100.0, step=0.01, format="%.2f",
                 key=f"analytics_pct_{cls_name}",
                 label_visibility="collapsed",
             )
