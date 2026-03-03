@@ -1113,6 +1113,58 @@ def _render_browse_items_section() -> None:
                     if _area > 0 or _pct > 0:
                         _edit_has_data = True
 
+                # ─ GeoJSON layer files ────────────────────────────────────────
+                st.markdown("**🗺️ Vector Change Layers** (upload to replace, skip to keep existing)")
+                _edit_geojson_uploads: dict[str, object] = {}
+                for _akey, (_alabel, _afilename) in GEOJSON_ASSETS.items():
+                    _apath = _analytics_folder / _afilename
+                    _exists = _apath.exists()
+                    _col_info, _col_up = st.columns([2, 3])
+                    with _col_info:
+                        if _exists:
+                            _sz = _apath.stat().st_size
+                            st.markdown(
+                                f'<div style="font-size:0.8rem;padding:0.3rem 0;">'
+                                f'✅ <b>{_alabel}</b><br>'
+                                f'<code style="font-size:0.68rem;color:#64748b;">{_apath}</code><br>'
+                                f'<span style="color:#64748b;font-size:0.7rem;">{_sz/1024:.1f} KB</span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(
+                                f'<div style="font-size:0.8rem;padding:0.3rem 0;color:#94a3b8;">'
+                                f'— <b>{_alabel}</b> — not uploaded yet</div>',
+                                unsafe_allow_html=True,
+                            )
+                    with _col_up:
+                        _uf = st.file_uploader(
+                            f"Replace {_alabel}",
+                            type=["geojson", "json"],
+                            key=f"edit_gj_{iid}_{_akey}",
+                            label_visibility="collapsed",
+                        )
+                        _edit_geojson_uploads[_akey] = _uf
+                        if _uf is not None:
+                            try:
+                                _uf.seek(0)
+                                _gj_data = json.loads(_uf.read())
+                                _uf.seek(0)
+                                _n_feat = len(_gj_data.get("features", []))
+                                st.markdown(
+                                    f'<span style="background:#dcfce7;border:1px solid #16a34a;'
+                                    f'color:#15803d;font-size:0.7rem;font-weight:700;'
+                                    f'padding:1px 8px;border-radius:100px;">✅ {_uf.name} · {_n_feat} features</span>',
+                                    unsafe_allow_html=True,
+                                )
+                            except Exception:
+                                st.markdown(
+                                    f'<span style="background:#fee2e2;border:1px solid #dc2626;'
+                                    f'color:#dc2626;font-size:0.7rem;font-weight:700;'
+                                    f'padding:1px 8px;border-radius:100px;">❌ Invalid GeoJSON</span>',
+                                    unsafe_allow_html=True,
+                                )
+
                 _cancel_edit, _save_edit = st.columns(2)
                 with _cancel_edit:
                     if st.button("❌ Cancel", key=f"edit_cancel_{iid}"):
@@ -1125,21 +1177,20 @@ def _render_browse_items_section() -> None:
                         if _current is None:
                             st.error("❌ Could not fetch current item from STAC API.")
                         else:
-                            # 2. Update properties
+                            # 2. Update datetime
                             _new_dt = datetime(
                                 _edit_date.year, _edit_date.month, _edit_date.day,
                                 tzinfo=timezone.utc
                             ).strftime("%Y-%m-%dT%H:%M:%SZ")
                             _current["properties"]["datetime"] = _new_dt
 
-                            # 3. Save updated analytics.json to disk
+                            # 3. Save updated analytics.json
                             if _edit_has_data:
                                 _analytics_folder.mkdir(parents=True, exist_ok=True)
                                 _analytics_path.write_text(
                                     json.dumps({"structures_made": _edit_rows}, indent=2),
                                     encoding="utf-8"
                                 )
-                                # Make sure analytics asset is in the item
                                 if "analytics" not in _current.get("assets", {}):
                                     _current.setdefault("assets", {})["analytics"] = {
                                         "href":  local_to_url(_analytics_path),
@@ -1148,7 +1199,22 @@ def _render_browse_items_section() -> None:
                                         "title": "Analytics Data",
                                     }
 
-                            # 4. PUT updated item to STAC API
+                            # 4. Save any uploaded GeoJSON replacements
+                            _analytics_folder.mkdir(parents=True, exist_ok=True)
+                            for _akey, _uf in _edit_geojson_uploads.items():
+                                if _uf is not None:
+                                    _uf.seek(0)
+                                    _dest = _analytics_folder / GEOJSON_ASSETS[_akey][1]
+                                    _dest.write_bytes(_uf.read())
+                                    # Update or add asset URL in the STAC item
+                                    _current.setdefault("assets", {})[_akey] = {
+                                        "href":  local_to_url(_dest),
+                                        "type":  "application/geo+json",
+                                        "roles": ["data"],
+                                        "title": GEOJSON_ASSETS[_akey][0],
+                                    }
+
+                            # 5. PUT updated item
                             ok, err = api_update_item(picked, iid, _current)
                             if ok:
                                 st.success(f"✅ Item **{iid}** updated!")
@@ -1158,11 +1224,13 @@ def _render_browse_items_section() -> None:
                                 st.error(f"❌ {err}")
 
             # ─ Delete confirmation ───────────────────────────────────────
+            if st.session_state.get(f"mine_del_confirm_{iid}"):
+                st.warning("Permanently delete this item?")
+                y, n = st.columns(2)
                 with y:
                     if st.button("✅ Yes", key=f"mine_del_yes_{iid}"):
                         ok, err = api_delete_item(picked, iid)
                         if ok:
-                            # Also remove the item folder from disk
                             import shutil as _shutil
                             item_folder = MINING_ROOT / picked / iid
                             if item_folder.exists():
