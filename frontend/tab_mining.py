@@ -426,6 +426,32 @@ def _render_create_collection_form() -> None:
                 "License",
                 ["proprietary", "various", "CC-BY-4.0", "ODbL-1.0"])
 
+        # ─ Bounding Box ──────────────────────────────────────────────────────────
+        st.markdown(
+            '<p style="font-size:0.82rem;color:var(--text-muted,#64748b);margin:0.4rem 0 0.2rem;">'
+            '🗺️ <b>Spatial Bounding Box</b> — drag the corner values to cover your mining region.'
+            ' Defaults to Telangana.</p>',
+            unsafe_allow_html=True,
+        )
+        _TGNA = [77.2, 15.8, 81.3, 19.9]   # Telangana: min_lon, min_lat, max_lon, max_lat
+        bb1, bb2, bb3, bb4 = st.columns(4)
+        with bb1:
+            bb_min_lon = st.number_input(
+                "Min Lon (W)", value=_TGNA[0], min_value=-180.0, max_value=180.0,
+                step=0.01, format="%.4f", key="cc_bb_min_lon")
+        with bb2:
+            bb_min_lat = st.number_input(
+                "Min Lat (S)", value=_TGNA[1], min_value=-90.0, max_value=90.0,
+                step=0.01, format="%.4f", key="cc_bb_min_lat")
+        with bb3:
+            bb_max_lon = st.number_input(
+                "Max Lon (E)", value=_TGNA[2], min_value=-180.0, max_value=180.0,
+                step=0.01, format="%.4f", key="cc_bb_max_lon")
+        with bb4:
+            bb_max_lat = st.number_input(
+                "Max Lat (N)", value=_TGNA[3], min_value=-90.0, max_value=90.0,
+                step=0.01, format="%.4f", key="cc_bb_max_lat")
+
         pr, cr = st.columns(2)
         with pr:
             preview = st.form_submit_button("👁️ Preview JSON")
@@ -437,7 +463,8 @@ def _render_create_collection_form() -> None:
             st.warning("Area ID and Area Name are required.")
             return
         col_id  = col_id.strip().lower().replace(" ", "-")
-        payload = build_collection_payload(col_id, col_title, col_desc, col_lic)
+        bbox    = [bb_min_lon, bb_min_lat, bb_max_lon, bb_max_lat]
+        payload = build_collection_payload(col_id, col_title, col_desc, col_lic, bbox=bbox)
 
         if preview:
             st.json(payload)

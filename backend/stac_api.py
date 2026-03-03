@@ -82,16 +82,20 @@ def fetch_collection_ids() -> list[str]:
     return sorted(c["id"] for c in fetch_collections() if "id" in c)
 
 
+_TELANGANA_BBOX = [77.2, 15.8, 81.3, 19.9]   # [min_lon, min_lat, max_lon, max_lat]
+
 def build_collection_payload(
     col_id: str, title: str, description: str, license_: str,
     created: str | None = None,
+    bbox: list[float] | None = None,
 ) -> dict:
     """Build a STAC Collection payload.
 
-    `created` is an ISO datetime string.  If not provided, the current UTC time
-    is used.  The `updated` field is always set to now.
+    `created` is an ISO datetime string.  Defaults to now.
+    `bbox`    is [min_lon, min_lat, max_lon, max_lat].  Defaults to Telangana.
     """
-    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now  = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    bbox = bbox or _TELANGANA_BBOX
     return {
         "type":         "Collection",
         "id":           col_id,
@@ -103,7 +107,7 @@ def build_collection_payload(
         "updated":      now,
         "links":        [],
         "extent": {
-            "spatial":  {"bbox": [[-180.0, -90.0, 180.0, 90.0]]},
+            "spatial":  {"bbox": [bbox]},
             "temporal": {"interval": [[None, None]]},
         },
     }
