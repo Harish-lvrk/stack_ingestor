@@ -960,7 +960,7 @@ def _render_create_item_section() -> None:
     # Manager requirement: % = layer_area / collection_bbox_area × 100
     _col_bbox_km2  = 0.0
     _col_bbox_info = ""
-    _selected_col  = st.session_state.get("mining_selected_col", "")
+    _selected_col  = st.session_state.get("item_col_select", selected_col)
     if _selected_col:
         try:
             from backend.stac_api import fetch_collection as _fc
