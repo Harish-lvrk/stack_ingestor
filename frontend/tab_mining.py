@@ -434,6 +434,50 @@ def _render_collections_section() -> None:
                             ) if col.get("license") in ["proprietary", "various", "CC-BY-4.0", "ODbL-1.0"] else 0,
                             key=f"edit_col_lic_{cid}"
                         )
+
+                        # ── Bounding Box ────────────────────────────────────────
+                        st.markdown(
+                            "**Spatial Bounding Box** "
+                            "<span style='font-size:0.78rem;color:#64748b;'>"
+                            "(any rectangle — does not need to be square)</span>",
+                            unsafe_allow_html=True,
+                        )
+                        _cur_bbox = (
+                            col.get("extent", {})
+                               .get("spatial", {})
+                               .get("bbox", [[77.2, 15.8, 81.3, 19.9]])[0]
+                        )
+                        # Defaults if bbox is missing or malformed
+                        _def = _cur_bbox if (isinstance(_cur_bbox, list) and len(_cur_bbox) == 4) \
+                               else [77.2, 15.8, 81.3, 19.9]
+
+                        _b1, _b2 = st.columns(2)
+                        _b3, _b4 = st.columns(2)
+                        with _b1:
+                            new_min_lon = st.number_input(
+                                "Min Longitude (West)", value=float(_def[0]),
+                                min_value=-180.0, max_value=180.0, step=0.01, format="%.4f",
+                                key=f"edit_col_min_lon_{cid}"
+                            )
+                        with _b2:
+                            new_min_lat = st.number_input(
+                                "Min Latitude (South)", value=float(_def[1]),
+                                min_value=-90.0, max_value=90.0, step=0.01, format="%.4f",
+                                key=f"edit_col_min_lat_{cid}"
+                            )
+                        with _b3:
+                            new_max_lon = st.number_input(
+                                "Max Longitude (East)", value=float(_def[2]),
+                                min_value=-180.0, max_value=180.0, step=0.01, format="%.4f",
+                                key=f"edit_col_max_lon_{cid}"
+                            )
+                        with _b4:
+                            new_max_lat = st.number_input(
+                                "Max Latitude (North)", value=float(_def[3]),
+                                min_value=-90.0, max_value=90.0, step=0.01, format="%.4f",
+                                key=f"edit_col_max_lat_{cid}"
+                            )
+
                         cancel_col, save_col = st.columns(2)
                         with cancel_col:
                             cancelled = st.form_submit_button("❌ Cancel")
@@ -451,9 +495,11 @@ def _render_collections_section() -> None:
                     if saved:
                         # Preserve original created timestamp
                         orig_created = col.get("created")
+                        new_bbox     = [new_min_lon, new_min_lat, new_max_lon, new_max_lat]
                         payload = build_collection_payload(
                             cid, new_title, new_desc, new_lic,
-                            created=orig_created
+                            created=orig_created,
+                            bbox=new_bbox,
                         )
                         ok, err = api_update_collection(cid, payload)
                         if ok:
