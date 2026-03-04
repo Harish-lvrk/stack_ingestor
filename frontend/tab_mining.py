@@ -407,6 +407,17 @@ def _render_collections_section() -> None:
                 if st.session_state.get(f"mine_editing_col_{cid}"):
                     with st.form(key=f"edit_col_form_{cid}"):
                         st.markdown(f"**✏️ Edit Mining Area: `{cid}`**")
+
+                        # ── Collection ID (read-only) ─────────────────────────
+                        st.text_input(
+                            "Collection ID (cannot be changed)",
+                            value=cid,
+                            disabled=True,
+                            help="The Collection ID is set at creation time and is permanent. "
+                                 "Changing it would break all items linked to this collection.",
+                            key=f"edit_col_id_ro_{cid}",
+                        )
+
                         new_title = st.text_input(
                             "Area Name", value=col.get("title", cid),
                             key=f"edit_col_title_{cid}"
@@ -428,6 +439,11 @@ def _render_collections_section() -> None:
                             cancelled = st.form_submit_button("❌ Cancel")
                         with save_col:
                             saved = st.form_submit_button("✅ Save Changes", type="primary")
+
+                    # ── View raw STAC JSON (outside form so it stays expanded) ─
+                    with st.expander(f"👁️ View Raw STAC JSON — {cid}"):
+                        st.json(col)
+
 
                     if cancelled:
                         del st.session_state[f"mine_editing_col_{cid}"]
