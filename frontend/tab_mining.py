@@ -372,6 +372,30 @@ def _render_collections_section() -> None:
             items = fetch_items(cid, limit=200)
 
             with grid[i % 3]:
+                # Read area from summaries (set on create/edit) or fall back to bbox calc
+                _area_km2 = col.get("summaries", {}).get("area_km2", 0.0)
+                _bbox_raw = (
+                    col.get("extent", {}).get("spatial", {}).get("bbox", [[]])[0]
+                )
+                if not _area_km2 and isinstance(_bbox_raw, list) and len(_bbox_raw) == 4:
+                    # Quick on-the-fly calc for older collections without summaries
+                    try:
+                        from pyproj import Geod as _GC
+                        _gc = _GC(ellps="WGS84")
+                        _mn, _ms, _mx, _my = map(float, _bbox_raw)
+                        _ring = [[_mn,_ms],[_mx,_ms],[_mx,_my],[_mn,_my],[_mn,_ms]]
+                        _ac, _ = _gc.polygon_area_perimeter(
+                            [float(p[0]) for p in _ring], [float(p[1]) for p in _ring]
+                        )
+                        _area_km2 = round(abs(float(_ac)) / 1_000_000, 4)
+                    except Exception:
+                        pass
+                _area_badge = (
+                    f'<span style="font-size:0.72rem;color:#10b981;font-weight:700;">'
+                    f'📐 {_area_km2:.2f} km²</span>'
+                    if _area_km2 > 0 else ""
+                )
+
                 st.markdown(f"""
                 <div class="stcard" style="min-height:120px;">
                   <div style="font-weight:800;font-size:0.95rem;
@@ -380,11 +404,13 @@ def _render_collections_section() -> None:
                   <p style="font-size:0.78rem;color:var(--text-muted);
                      margin:0.35rem 0 0.3rem;min-height:32px;
                      overflow:hidden;">{desc[:80] or "—"}</p>
-                  <div style="font-size:0.73rem;color:var(--text-muted);">
+                  <div style="font-size:0.73rem;color:var(--text-muted);display:flex;gap:0.75rem;align-items:center;">
                     📋 {len(items)} survey item{"s" if len(items) != 1 else ""}
+                    {_area_badge}
                   </div>
                 </div>
                 """, unsafe_allow_html=True)
+
 
                 bc1, bc2, bc3, bc4 = st.columns([3, 1, 1, 1])
                 with bc1:

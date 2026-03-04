@@ -96,6 +96,36 @@ def build_collection_payload(
     """
     now  = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     bbox = bbox or _TELANGANA_BBOX
+
+    # Compute bbox area in km² and store in summaries
+    area_km2 = 0.0
+    try:
+        min_lon, min_lat, max_lon, max_lat = map(float, bbox)
+        ring = [
+            [min_lon, min_lat], [max_lon, min_lat],
+            [max_lon, max_lat], [min_lon, max_lat],
+            [min_lon, min_lat],
+        ]
+        try:
+            from pyproj import Geod
+            _g = Geod(ellps="WGS84")
+            _a, _ = _g.polygon_area_perimeter(
+                [float(p[0]) for p in ring],
+                [float(p[1]) for p in ring],
+            )
+            area_km2 = round(abs(float(_a)) / 1_000_000, 4)
+        except ImportError:
+            import numpy as _np
+            _R = 6_371_000.0
+            _lo = _np.radians([float(p[0]) for p in ring])
+            _la = _np.radians([float(p[1]) for p in ring])
+            area_km2 = round(
+                abs(float(_np.sum(_np.diff(_lo) * (_np.sin(_la[:-1]) + _np.sin(_la[1:])))))
+                * _R * _R / 2 / 1_000_000, 4
+            )
+    except Exception:
+        pass
+
     return {
         "type":         "Collection",
         "id":           col_id,
@@ -106,11 +136,13 @@ def build_collection_payload(
         "created":      created or now,
         "updated":      now,
         "links":        [],
+        "summaries":    {"area_km2": area_km2},
         "extent": {
             "spatial":  {"bbox": [bbox]},
             "temporal": {"interval": [[None, None]]},
         },
     }
+
 
 
 def api_create_collection(payload: dict) -> tuple[bool, str]:
