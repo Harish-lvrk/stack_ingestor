@@ -1041,7 +1041,7 @@ def _render_create_item_section() -> None:
                 auto_area = _computed_areas.get(akey, 0.0)
                 break
 
-        auto_pct = round((auto_area / _boundary_km2 * 100), 2) if (_boundary_km2 > 0 and auto_area > 0) else 0.0
+        auto_pct = round((auto_area / _denom_km2 * 100), 2) if (_denom_km2 > 0 and auto_area > 0) else 0.0
 
         row_cols = st.columns([3, 2, 2])
         with row_cols[0]:
