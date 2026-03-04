@@ -1712,23 +1712,6 @@ def _render_browse_items_section() -> None:
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def render_mining_tab() -> None:
-    _dark = st.session_state.get("dark_mode", False)
-    _tcol = "#f1f5f9" if _dark else "#0f172a"
-
-    st.markdown(
-        f"""
-        <div style="padding:0.5rem 0 0.8rem;">
-          <h2 style="font-size:1.75rem;font-weight:800;margin:0;color:{_tcol};">
-            ⛏️ Mining Manager
-          </h2>
-          <p style="color:var(--text-muted,#64748b);margin-top:0.2rem;font-size:0.88rem;">
-            Create and manage mining areas and their survey items
-          </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     # ── Session-state-driven navigation (supports programmatic tab switching) ──
     active = st.session_state.get("mining_active_tab", 0)
 
