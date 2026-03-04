@@ -372,8 +372,10 @@ def _render_collections_section() -> None:
             items = fetch_items(cid, limit=200)
 
             with grid[i % 3]:
-                # Read area from summaries (set on create/edit) or fall back to bbox calc
-                _area_km2 = col.get("summaries", {}).get("area_km2", 0.0)
+                # Read area from summaries — stored as [float] per STAC spec
+                _area_raw = col.get("summaries", {}).get("area_km2", 0.0)
+                _area_km2 = (_area_raw[0] if isinstance(_area_raw, list) and _area_raw
+                             else float(_area_raw or 0))
                 _bbox_raw = (
                     col.get("extent", {}).get("spatial", {}).get("bbox", [[]])[0]
                 )

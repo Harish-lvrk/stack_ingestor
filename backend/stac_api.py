@@ -136,7 +136,7 @@ def build_collection_payload(
         "created":      created or now,
         "updated":      now,
         "links":        [],
-        "summaries":    {"area_km2": area_km2},
+        "summaries":    {"area_km2": [area_km2]},
         "extent": {
             "spatial":  {"bbox": [bbox]},
             "temporal": {"interval": [[None, None]]},
