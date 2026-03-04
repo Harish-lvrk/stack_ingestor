@@ -230,25 +230,44 @@ def _validate_geojson_bytes(key: str, data: bytes) -> tuple[bool, str]:
 def _geojson_area_km2(geojson_bytes: bytes) -> tuple[float, str]:
     """Calculate total geodesic area of all features in a GeoJSON file (km²).
 
+    Uses pyproj.Geod when available; falls back to numpy spherical formula.
     Returns (area_km2, error_msg).  error_msg is "" on success.
-    Only Polygon / MultiPolygon contribute area; LineString etc. give 0.0.
     """
     try:
-        from pyproj import Geod
-        geod = Geod(ellps="WGS84")
-        gj   = json.loads(geojson_bytes)
+        import json as _json
+        import numpy as _np
+
+        gj       = _json.loads(geojson_bytes)
         features = gj.get("features", [])
         total_m2 = 0.0
 
-        def _ring_area(ring: list) -> float:
-            lons = [float(pt[0]) for pt in ring]
-            lats = [float(pt[1]) for pt in ring]
-            area, _ = geod.polygon_area_perimeter(lons, lats)
-            return abs(float(area))
+        # ── Choose calculation backend ────────────────────────────────────────
+        try:
+            from pyproj import Geod as _Geod
+            _geod = _Geod(ellps="WGS84")
 
+            def _ring_area(ring: list) -> float:
+                lons = [float(p[0]) for p in ring]
+                lats = [float(p[1]) for p in ring]
+                a, _ = _geod.polygon_area_perimeter(lons, lats)
+                return abs(float(a))
+
+        except ImportError:
+            # numpy-only fallback: spherical trapezoid formula
+            # area = R² × |Σ(λ₂−λ₁)(sin φ₁ + sin φ₂)| / 2
+            _R = 6_371_000.0
+
+            def _ring_area(ring: list) -> float:  # type: ignore[misc]
+                lons = _np.radians([float(p[0]) for p in ring])
+                lats = _np.radians([float(p[1]) for p in ring])
+                dlons = _np.diff(lons)
+                s     = _np.sin(lats[:-1]) + _np.sin(lats[1:])
+                return abs(float(_np.sum(dlons * s))) * _R * _R / 2.0
+
+        # ── Sum area over all features ────────────────────────────────────────
         for feat in features:
-            geom  = feat.get("geometry") or {}
-            gtype = geom.get("type", "")
+            geom   = feat.get("geometry") or {}
+            gtype  = geom.get("type", "")
             coords = geom.get("coordinates", [])
 
             if gtype == "Polygon":
@@ -261,11 +280,13 @@ def _geojson_area_km2(geojson_bytes: bytes) -> tuple[float, str]:
                     total_m2 += _ring_area(poly[0])
                     for hole in poly[1:]:
                         total_m2 -= _ring_area(hole)
-            # LineString / Point etc. → no area contribution
+            # LineString / Point → no area
 
         return max(total_m2, 0.0) / 1_000_000, ""
+
     except Exception as _e:
         return 0.0, str(_e)
+
 
 
 def _extract_image_date(cog_path: Path, filename_stem: str) -> tuple[str, str]:
