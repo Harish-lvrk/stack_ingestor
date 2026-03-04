@@ -82,6 +82,16 @@ def fetch_collection_ids() -> list[str]:
     return sorted(c["id"] for c in fetch_collections() if "id" in c)
 
 
+def fetch_collection(col_id: str) -> dict | None:
+    """Fetch a single STAC collection by ID. Returns None on error."""
+    try:
+        r = _get(f"/collections/{col_id}")
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+
 _TELANGANA_BBOX = [77.2, 15.8, 81.3, 19.9]   # [min_lon, min_lat, max_lon, max_lat]
 
 def build_collection_payload(
