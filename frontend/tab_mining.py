@@ -1396,6 +1396,15 @@ def _render_browse_items_section() -> None:
                     "Mining Area", "New Mine Pit Area", "Stockpile / Dumping Area",
                     "Reclamation", "Extended Land", "Temporary Water Pits",
                 ]
+                _EDIT_AKEY_TO_CLASS = {
+                    "boundary":             None,
+                    "mining_area":          "Mining Area",
+                    "new_mine_pit":         "New Mine Pit Area",
+                    "stockpile":            "Stockpile / Dumping Area",
+                    "reclamation":          "Reclamation",
+                    "haul_roads":           None,
+                    "temporary_water_pits": "Temporary Water Pits",
+                }
 
                 # Try to load existing analytics.json for pre-fill
                 _analytics_folder = MINING_ROOT / picked / iid
@@ -1418,6 +1427,56 @@ def _render_browse_items_section() -> None:
                     "Year Label", value=_year_key, key=f"edit_year_{iid}"
                 )
 
+                # ── Fetch denominator (collection bbox area) for live % calc ──
+                _edit_denom_km2 = 0.0
+                try:
+                    from backend.stac_api import fetch_collection as _fc2
+                    _edit_col = _fc2(picked)
+                    if _edit_col:
+                        _edit_bbox = (
+                            _edit_col.get("extent", {})
+                                     .get("spatial", {})
+                                     .get("bbox", [[]])[0]
+                        )
+                        if (isinstance(_edit_bbox, list) and len(_edit_bbox) == 4
+                                and all(v is not None for v in _edit_bbox)):
+                            _el, _eb, _er, _et = map(float, _edit_bbox)
+                            _edit_ring = [
+                                [_el, _eb], [_er, _eb],
+                                [_er, _et], [_el, _et], [_el, _eb],
+                            ]
+                            try:
+                                from pyproj import Geod as _G3
+                                _g3 = _G3(ellps="WGS84")
+                                _a3, _ = _g3.polygon_area_perimeter(
+                                    [p[0] for p in _edit_ring],
+                                    [p[1] for p in _edit_ring],
+                                )
+                                _edit_denom_km2 = abs(float(_a3)) / 1_000_000
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                # ── Read already-uploaded GeoJSONs from session_state ─────────
+                # This runs BEFORE the analytics inputs so we can inject areas.
+                _edit_upload_areas: dict[str, float] = {}
+                for _akey, _cls in _EDIT_AKEY_TO_CLASS.items():
+                    if _cls is None:
+                        continue
+                    _uf_state = st.session_state.get(f"edit_gj_{iid}_{_akey}")
+                    if _uf_state is not None:
+                        try:
+                            _uf_state.seek(0)
+                            _uf_bytes = _uf_state.read()
+                            _uf_state.seek(0)
+                            _a_km2, _a_err = _geojson_area_km2(_uf_bytes)
+                            if not _a_err:
+                                _edit_upload_areas[_cls] = _a_km2
+                        except Exception:
+                            pass
+
+                # ── Analytics inputs ──────────────────────────────────────────
                 _hdr = st.columns([3, 2, 2])
                 _hdr[0].markdown("**Land Cover Class**")
                 _hdr[1].markdown("**Area (km²)**")
@@ -1434,6 +1493,18 @@ def _render_browse_items_section() -> None:
                         list(_prev.get("percentage_covered", {"_": 0}).values())[0]
                     ) if _prev else 0.0
 
+                    _sk_ea = f"edit_area_{iid}_{_cls}"
+                    _sk_ep = f"edit_pct_{iid}_{_cls}"
+
+                    # If a new GeoJSON upload matches this class, override area
+                    if _cls in _edit_upload_areas:
+                        st.session_state[_sk_ea] = round(_edit_upload_areas[_cls], 3)
+                    elif _sk_ea not in st.session_state:
+                        st.session_state[_sk_ea] = _prev_area
+
+                    if _sk_ep not in st.session_state:
+                        st.session_state[_sk_ep] = _prev_pct
+
                     _rc = st.columns([3, 2, 2])
                     with _rc[0]:
                         st.markdown(
@@ -1442,16 +1513,21 @@ def _render_browse_items_section() -> None:
                         )
                     with _rc[1]:
                         _area = st.number_input(
-                            f"area {_cls}", value=_prev_area,
+                            f"area {_cls}",
                             min_value=0.0, step=0.001, format="%.3f",
-                            key=f"edit_area_{iid}_{_cls}",
+                            key=_sk_ea,
                             label_visibility="collapsed",
                         )
                     with _rc[2]:
+                        # Compute pct live from current area and denominator
+                        if _edit_denom_km2 > 0:
+                            st.session_state[_sk_ep] = min(
+                                round(_area / _edit_denom_km2 * 100, 1), 100.0
+                            )
                         _pct = st.number_input(
-                            f"pct {_cls}", value=_prev_pct,
+                            f"pct {_cls}",
                             min_value=0.0, max_value=100.0, step=0.1, format="%.1f",
-                            key=f"edit_pct_{iid}_{_cls}",
+                            key=_sk_ep,
                             label_visibility="collapsed",
                         )
                     _edit_rows.append({
@@ -1514,13 +1590,21 @@ def _render_browse_items_section() -> None:
                         if _uf is not None:
                             try:
                                 _uf.seek(0)
-                                _gj_staged = json.loads(_uf.read())
+                                _uf_bytes2 = _uf.read()
                                 _uf.seek(0)
+                                _gj_staged = json.loads(_uf_bytes2)
                                 _n_feat = len(_gj_staged.get("features", []))
+                                # Show area badge
+                                _a2, _e2 = _geojson_area_km2(_uf_bytes2)
+                                _area_badge = (
+                                    f" · <b>{_a2:.4f} km²</b>" if not _e2 and _a2 > 0
+                                    else ""
+                                )
                                 st.markdown(
                                     f'<span style="background:#dcfce7;border:1px solid #16a34a;'
                                     f'color:#15803d;font-size:0.7rem;font-weight:700;'
-                                    f'padding:1px 8px;border-radius:100px;">✅ {_uf.name} · {_n_feat} features — will replace on Save</span>',
+                                    f'padding:1px 8px;border-radius:100px;">'
+                                    f'✅ {_uf.name} · {_n_feat} features{_area_badge} — will replace on Save</span>',
                                     unsafe_allow_html=True,
                                 )
                             except Exception:
@@ -1530,6 +1614,7 @@ def _render_browse_items_section() -> None:
                                     f'padding:1px 8px;border-radius:100px;">❌ Invalid GeoJSON</span>',
                                     unsafe_allow_html=True,
                                 )
+
 
                 _cancel_edit, _save_edit = st.columns(2)
                 with _cancel_edit:
