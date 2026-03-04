@@ -970,7 +970,7 @@ def _render_create_item_section() -> None:
                          .get("spatial", {})
                          .get("bbox", [[]])[0]
             )
-            if isinstance(_bbox, list) and len(_bbox) == 4:
+            if isinstance(_bbox, list) and len(_bbox) == 4 and all(v is not None for v in _bbox):
                 _min_lon, _min_lat, _max_lon, _max_lat = map(float, _bbox)
                 _rect_ring = [
                     [_min_lon, _min_lat], [_max_lon, _min_lat],
@@ -1008,9 +1008,8 @@ def _render_create_item_section() -> None:
         for _akey, _mapped_cls in _AKEY_TO_CLASS.items():
             if _mapped_cls:
                 _a = _computed_areas.get(_akey, 0.0)
-                _p = round(_a / _denom_km2 * 100, 2) if (_denom_km2 > 0 and _a > 0) else 0.0
+                # Only push area — pct is computed live per-row after rendering
                 st.session_state[f"analytics_area_{_mapped_cls}"] = round(_a, 4)
-                st.session_state[f"analytics_pct_{_mapped_cls}"]  = _p
         st.session_state[_applied_key] = dict(_computed_areas)
 
     has_auto_fill = any(
@@ -1036,14 +1035,19 @@ def _render_create_item_section() -> None:
     header_cols[2].markdown("**% Covered**")
 
     for cls_name in _ANALYTIC_CLASSES:
-        # Find the akey whose class matches this row
+        # Find the uploaded area for this class
         auto_area = 0.0
         for akey, mapped_cls in _AKEY_TO_CLASS.items():
             if mapped_cls == cls_name:
                 auto_area = _computed_areas.get(akey, 0.0)
                 break
 
-        auto_pct = round((auto_area / _denom_km2 * 100), 2) if (_denom_km2 > 0 and auto_area > 0) else 0.0
+        _sk_area = f"analytics_area_{cls_name}"
+        _sk_pct  = f"analytics_pct_{cls_name}"
+
+        # Seed area only if not yet in session_state (first render)
+        if _sk_area not in st.session_state:
+            st.session_state[_sk_area] = round(auto_area, 4)
 
         row_cols = st.columns([3, 2, 2])
         with row_cols[0]:
@@ -1053,19 +1057,25 @@ def _render_create_item_section() -> None:
                 unsafe_allow_html=True,
             )
         with row_cols[1]:
+            # No value= — widget reads from session_state[_sk_area]
             area_val = st.number_input(
                 f"km² {cls_name}",
-                value=round(auto_area, 4),
                 min_value=0.0, step=0.001, format="%.4f",
-                key=f"analytics_area_{cls_name}",
+                key=_sk_area,
                 label_visibility="collapsed",
             )
         with row_cols[2]:
+            # Compute pct LIVE from current area_val and denominator
+            if _denom_km2 > 0:
+                st.session_state[_sk_pct] = min(
+                    round(area_val / _denom_km2 * 100, 2), 100.0
+                )
+            elif _sk_pct not in st.session_state:
+                st.session_state[_sk_pct] = 0.0
             pct_val = st.number_input(
                 f"% {cls_name}",
-                value=round(auto_pct, 2),
                 min_value=0.0, max_value=100.0, step=0.01, format="%.2f",
-                key=f"analytics_pct_{cls_name}",
+                key=_sk_pct,
                 label_visibility="collapsed",
             )
         analytics_rows.append({
