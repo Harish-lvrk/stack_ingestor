@@ -227,6 +227,68 @@ def _validate_geojson_bytes(key: str, data: bytes) -> tuple[bool, str]:
         return False, f"{key}: Invalid GeoJSON — {e}"
 
 
+def _geojson_area_km2(geojson_bytes: bytes) -> tuple[float, str]:
+    """Calculate total geodesic area of all features in a GeoJSON file (km²).
+
+    Uses pyproj.Geod when available; falls back to numpy spherical formula.
+    Returns (area_km2, error_msg).  error_msg is "" on success.
+    """
+    try:
+        import json as _json
+        import numpy as _np
+
+        gj       = _json.loads(geojson_bytes)
+        features = gj.get("features", [])
+        total_m2 = 0.0
+
+        # ── Choose calculation backend ────────────────────────────────────────
+        try:
+            from pyproj import Geod as _Geod
+            _geod = _Geod(ellps="WGS84")
+
+            def _ring_area(ring: list) -> float:
+                lons = [float(p[0]) for p in ring]
+                lats = [float(p[1]) for p in ring]
+                a, _ = _geod.polygon_area_perimeter(lons, lats)
+                return abs(float(a))
+
+        except ImportError:
+            # numpy-only fallback: spherical trapezoid formula
+            # area = R² × |Σ(λ₂−λ₁)(sin φ₁ + sin φ₂)| / 2
+            _R = 6_371_000.0
+
+            def _ring_area(ring: list) -> float:  # type: ignore[misc]
+                lons = _np.radians([float(p[0]) for p in ring])
+                lats = _np.radians([float(p[1]) for p in ring])
+                dlons = _np.diff(lons)
+                s     = _np.sin(lats[:-1]) + _np.sin(lats[1:])
+                return abs(float(_np.sum(dlons * s))) * _R * _R / 2.0
+
+        # ── Sum area over all features ────────────────────────────────────────
+        for feat in features:
+            geom   = feat.get("geometry") or {}
+            gtype  = geom.get("type", "")
+            coords = geom.get("coordinates", [])
+
+            if gtype == "Polygon":
+                total_m2 += _ring_area(coords[0])
+                for hole in coords[1:]:
+                    total_m2 -= _ring_area(hole)
+
+            elif gtype == "MultiPolygon":
+                for poly in coords:
+                    total_m2 += _ring_area(poly[0])
+                    for hole in poly[1:]:
+                        total_m2 -= _ring_area(hole)
+            # LineString / Point → no area
+
+        return max(total_m2, 0.0) / 1_000_000, ""
+
+    except Exception as _e:
+        return 0.0, str(_e)
+
+
+
 def _extract_image_date(cog_path: Path, filename_stem: str) -> tuple[str, str]:
     """Try to extract acquisition date from rasterio tags or filename.
 
@@ -310,6 +372,30 @@ def _render_collections_section() -> None:
             items = fetch_items(cid, limit=200)
 
             with grid[i % 3]:
+                # Read area from summaries (set on create/edit) or fall back to bbox calc
+                _area_km2 = col.get("summaries", {}).get("area_km2", 0.0)
+                _bbox_raw = (
+                    col.get("extent", {}).get("spatial", {}).get("bbox", [[]])[0]
+                )
+                if not _area_km2 and isinstance(_bbox_raw, list) and len(_bbox_raw) == 4:
+                    # Quick on-the-fly calc for older collections without summaries
+                    try:
+                        from pyproj import Geod as _GC
+                        _gc = _GC(ellps="WGS84")
+                        _mn, _ms, _mx, _my = map(float, _bbox_raw)
+                        _ring = [[_mn,_ms],[_mx,_ms],[_mx,_my],[_mn,_my],[_mn,_ms]]
+                        _ac, _ = _gc.polygon_area_perimeter(
+                            [float(p[0]) for p in _ring], [float(p[1]) for p in _ring]
+                        )
+                        _area_km2 = round(abs(float(_ac)) / 1_000_000, 4)
+                    except Exception:
+                        pass
+                _area_badge = (
+                    f'<span style="font-size:0.72rem;color:#10b981;font-weight:700;">'
+                    f'📐 {_area_km2:.2f} km²</span>'
+                    if _area_km2 > 0 else ""
+                )
+
                 st.markdown(f"""
                 <div class="stcard" style="min-height:120px;">
                   <div style="font-weight:800;font-size:0.95rem;
@@ -318,13 +404,15 @@ def _render_collections_section() -> None:
                   <p style="font-size:0.78rem;color:var(--text-muted);
                      margin:0.35rem 0 0.3rem;min-height:32px;
                      overflow:hidden;">{desc[:80] or "—"}</p>
-                  <div style="font-size:0.73rem;color:var(--text-muted);">
+                  <div style="font-size:0.73rem;color:var(--text-muted);display:flex;gap:0.75rem;align-items:center;">
                     📋 {len(items)} survey item{"s" if len(items) != 1 else ""}
+                    {_area_badge}
                   </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-                bc1, bc2, bc3 = st.columns([3, 1, 1])
+
+                bc1, bc2, bc3, bc4 = st.columns([3, 1, 1, 1])
                 with bc1:
                     if st.button("Browse Items →",
                                  key=f"mine_browse_{cid}",
@@ -336,15 +424,37 @@ def _render_collections_section() -> None:
                     if st.button("✏️", key=f"mine_edit_col_{cid}",
                                  help=f"Edit {cid}"):
                         st.session_state[f"mine_editing_col_{cid}"] = not st.session_state.get(f"mine_editing_col_{cid}", False)
+                        st.session_state.pop(f"mine_viewjson_{cid}", None)
                 with bc3:
+                    if st.button("📄", key=f"mine_json_col_{cid}",
+                                 help=f"View STAC JSON for {cid}"):
+                        st.session_state[f"mine_viewjson_{cid}"] = not st.session_state.get(f"mine_viewjson_{cid}", False)
+                        st.session_state.pop(f"mine_editing_col_{cid}", None)
+                with bc4:
                     if st.button("🗑️", key=f"mine_del_col_{cid}",
                                  help=f"Delete {cid}"):
                         st.session_state[f"mine_confirm_del_col_{cid}"] = True
+
+                # ─ View Raw STAC JSON (standalone, no edit required) ──────────
+                if st.session_state.get(f"mine_viewjson_{cid}"):
+                    with st.expander(f"👁️ Raw STAC JSON — {cid}", expanded=True):
+                        st.json(col)
 
                 # ─ Edit Collection form ─────────────────────────────────────
                 if st.session_state.get(f"mine_editing_col_{cid}"):
                     with st.form(key=f"edit_col_form_{cid}"):
                         st.markdown(f"**✏️ Edit Mining Area: `{cid}`**")
+
+                        # ── Collection ID (read-only) ─────────────────────────
+                        st.text_input(
+                            "Collection ID (cannot be changed)",
+                            value=cid,
+                            disabled=True,
+                            help="The Collection ID is set at creation time and is permanent. "
+                                 "Changing it would break all items linked to this collection.",
+                            key=f"edit_col_id_ro_{cid}",
+                        )
+
                         new_title = st.text_input(
                             "Area Name", value=col.get("title", cid),
                             key=f"edit_col_title_{cid}"
@@ -361,11 +471,60 @@ def _render_collections_section() -> None:
                             ) if col.get("license") in ["proprietary", "various", "CC-BY-4.0", "ODbL-1.0"] else 0,
                             key=f"edit_col_lic_{cid}"
                         )
+
+                        # ── Bounding Box ────────────────────────────────────────
+                        st.markdown(
+                            "**Spatial Bounding Box** "
+                            "<span style='font-size:0.78rem;color:#64748b;'>"
+                            "(any rectangle — does not need to be square)</span>",
+                            unsafe_allow_html=True,
+                        )
+                        _cur_bbox = (
+                            col.get("extent", {})
+                               .get("spatial", {})
+                               .get("bbox", [[77.2, 15.8, 81.3, 19.9]])[0]
+                        )
+                        # Defaults if bbox is missing or malformed
+                        _def = _cur_bbox if (isinstance(_cur_bbox, list) and len(_cur_bbox) == 4) \
+                               else [77.2, 15.8, 81.3, 19.9]
+
+                        _b1, _b2 = st.columns(2)
+                        _b3, _b4 = st.columns(2)
+                        with _b1:
+                            new_min_lon = st.number_input(
+                                "Min Longitude (West)", value=float(_def[0]),
+                                min_value=-180.0, max_value=180.0, step=0.01, format="%.4f",
+                                key=f"edit_col_min_lon_{cid}"
+                            )
+                        with _b2:
+                            new_min_lat = st.number_input(
+                                "Min Latitude (South)", value=float(_def[1]),
+                                min_value=-90.0, max_value=90.0, step=0.01, format="%.4f",
+                                key=f"edit_col_min_lat_{cid}"
+                            )
+                        with _b3:
+                            new_max_lon = st.number_input(
+                                "Max Longitude (East)", value=float(_def[2]),
+                                min_value=-180.0, max_value=180.0, step=0.01, format="%.4f",
+                                key=f"edit_col_max_lon_{cid}"
+                            )
+                        with _b4:
+                            new_max_lat = st.number_input(
+                                "Max Latitude (North)", value=float(_def[3]),
+                                min_value=-90.0, max_value=90.0, step=0.01, format="%.4f",
+                                key=f"edit_col_max_lat_{cid}"
+                            )
+
                         cancel_col, save_col = st.columns(2)
                         with cancel_col:
                             cancelled = st.form_submit_button("❌ Cancel")
                         with save_col:
                             saved = st.form_submit_button("✅ Save Changes", type="primary")
+
+                    # ── View raw STAC JSON (outside form so it stays expanded) ─
+                    with st.expander(f"👁️ View Raw STAC JSON — {cid}"):
+                        st.json(col)
+
 
                     if cancelled:
                         del st.session_state[f"mine_editing_col_{cid}"]
@@ -373,9 +532,11 @@ def _render_collections_section() -> None:
                     if saved:
                         # Preserve original created timestamp
                         orig_created = col.get("created")
+                        new_bbox     = [new_min_lon, new_min_lat, new_max_lon, new_max_lat]
                         payload = build_collection_payload(
                             cid, new_title, new_desc, new_lic,
-                            created=orig_created
+                            created=orig_created,
+                            bbox=new_bbox,
                         )
                         ok, err = api_update_collection(cid, payload)
                         if ok:
@@ -696,6 +857,11 @@ def _render_create_item_section() -> None:
     left_assets  = keys[: len(keys) // 2 + len(keys) % 2]
     right_assets = keys[len(keys) // 2 + len(keys) % 2 :]
 
+    # session_state key for per-item computed areas: {akey: km2}
+    _area_sk = f"_gj_areas_{item_id_auto or 'new'}"
+    if _area_sk not in st.session_state:
+        st.session_state[_area_sk] = {}
+
     col_l, col_r = st.columns(2)
     for col_widget, asset_group in [(col_l, left_assets), (col_r, right_assets)]:
         with col_widget:
@@ -709,24 +875,41 @@ def _render_create_item_section() -> None:
                 geojson_files[akey] = uploaded
                 if uploaded is not None:
                     try:
-                        gj = json.loads(uploaded.read())
+                        raw = uploaded.read()
                         uploaded.seek(0)
-                        n_feat = len(gj.get("features", []))
-                        st.markdown(
-                            f'<span style="background:#dcfce7;border:1px solid #16a34a;'
-                            f'color:#15803d;font-size:0.72rem;font-weight:700;'
-                            f'padding:2px 10px;border-radius:100px;">'
-                            f'✅ {uploaded.name} · {n_feat} feature{"s" if n_feat!=1 else ""}</span>',
-                            unsafe_allow_html=True,
-                        )
-                    except Exception:
+                        gj       = json.loads(raw)
+                        n_feat   = len(gj.get("features", []))
+                        area_km2, area_err = _geojson_area_km2(raw)
+                        st.session_state[_area_sk][akey] = area_km2
+                        if area_err:
+                            # Calculation failed — show the actual error
+                            st.markdown(
+                                f'<span style="background:#fef9c3;border:1px solid #ca8a04;'
+                                f'color:#854d0e;font-size:0.72rem;font-weight:700;'
+                                f'padding:2px 10px;border-radius:100px;">'
+                                f'⚠️ {uploaded.name} · {n_feat} ft · area error: {area_err[:60]}</span>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            area_label = f'{area_km2:.4f} km²' if area_km2 > 0 else 'no polygon geometry'
+                            st.markdown(
+                                f'<span style="background:#dcfce7;border:1px solid #16a34a;'
+                                f'color:#15803d;font-size:0.72rem;font-weight:700;'
+                                f'padding:2px 10px;border-radius:100px;">'
+                                f'✅ {uploaded.name} · {n_feat} feature{"s" if n_feat!=1 else ""} · <b>{area_label}</b></span>',
+                                unsafe_allow_html=True,
+                            )
+                    except Exception as _e:
+                        st.session_state[_area_sk].pop(akey, None)
                         st.markdown(
                             f'<span style="background:#fee2e2;border:1px solid #dc2626;'
                             f'color:#dc2626;font-size:0.72rem;font-weight:700;'
                             f'padding:2px 10px;border-radius:100px;">'
-                            f'❌ {uploaded.name} · Invalid GeoJSON</span>',
+                            f'❌ {uploaded.name} · {str(_e)[:60]}</span>',
                             unsafe_allow_html=True,
                         )
+                else:
+                    st.session_state[_area_sk].pop(akey, None)
 
     st.divider()
 
@@ -759,6 +942,89 @@ def _render_create_item_section() -> None:
         help="Auto-detected from the image filename. Edit if needed.",
     )
 
+    _AKEY_TO_CLASS: dict[str, str | None] = {
+        "boundary":             None,
+        "mining_area":          "Mining Area",
+        "new_mine_pit":         "New Mine Pit Area",
+        "stockpile":            "Stockpile / Dumping Area",
+        "reclamation":          "Reclamation",
+        "haul_roads":           None,
+        "temporary_water_pits": "Temporary Water Pits",
+    }
+
+    _computed_areas = st.session_state.get(_area_sk, {})
+
+    # ─ % denominator = geodesic area of the selected collection's bbox ─────────
+    # Manager requirement: % = layer_area / collection_bbox_area × 100
+    _col_bbox_km2  = 0.0
+    _col_bbox_info = ""
+    _selected_col  = st.session_state.get("mining_selected_col", "")
+    if _selected_col:
+        try:
+            from backend.stac_api import fetch_collection as _fc
+            _col_data = _fc(_selected_col)
+            _bbox = (
+                _col_data.get("extent", {})
+                         .get("spatial", {})
+                         .get("bbox", [[]])[0]
+            )
+            if isinstance(_bbox, list) and len(_bbox) == 4:
+                _min_lon, _min_lat, _max_lon, _max_lat = map(float, _bbox)
+                _rect_ring = [
+                    [_min_lon, _min_lat], [_max_lon, _min_lat],
+                    [_max_lon, _max_lat], [_min_lon, _max_lat],
+                    [_min_lon, _min_lat],
+                ]
+                try:
+                    from pyproj import Geod as _G2
+                    _g2  = _G2(ellps="WGS84")
+                    _lons = [float(p[0]) for p in _rect_ring]
+                    _lats = [float(p[1]) for p in _rect_ring]
+                    _a2, _ = _g2.polygon_area_perimeter(_lons, _lats)
+                    _col_bbox_km2 = abs(float(_a2)) / 1_000_000
+                except ImportError:
+                    import numpy as _npb
+                    _R2 = 6_371_000.0
+                    _lo = _npb.radians([float(p[0]) for p in _rect_ring])
+                    _la = _npb.radians([float(p[1]) for p in _rect_ring])
+                    _col_bbox_km2 = abs(float(
+                        _npb.sum(_npb.diff(_lo) * (_npb.sin(_la[:-1]) + _npb.sin(_la[1:])))
+                    )) * _R2 * _R2 / 2 / 1_000_000
+                _col_bbox_info = (
+                    f"**{_selected_col}** bbox area = **{_col_bbox_km2:.4f} km\u00b2**"
+                )
+        except Exception:
+            pass
+
+    # Fall back to uploaded boundary.geojson area when no collection bbox set
+    _denom_km2 = _col_bbox_km2 if _col_bbox_km2 > 0 else _computed_areas.get("boundary", 0.0)
+
+    # ─ Push computed areas into widget session_state keys (only on new uploads) ─
+    _applied_key  = f"_gj_applied_{item_id_auto or 'new'}"
+    _last_applied = st.session_state.get(_applied_key, {})
+    if _computed_areas != _last_applied:
+        for _akey, _mapped_cls in _AKEY_TO_CLASS.items():
+            if _mapped_cls:
+                _a = _computed_areas.get(_akey, 0.0)
+                _p = round(_a / _denom_km2 * 100, 2) if (_denom_km2 > 0 and _a > 0) else 0.0
+                st.session_state[f"analytics_area_{_mapped_cls}"] = round(_a, 4)
+                st.session_state[f"analytics_pct_{_mapped_cls}"]  = _p
+        st.session_state[_applied_key] = dict(_computed_areas)
+
+    has_auto_fill = any(
+        _computed_areas.get(k, 0.0) > 0
+        for k, cls in _AKEY_TO_CLASS.items() if cls
+    )
+    if has_auto_fill:
+        _denom_label = (
+            f"Collection bbox area: {_col_bbox_info} used for % calculation."
+            if _col_bbox_km2 > 0
+            else "Set collection bbox or upload `boundary.geojson` to auto-calculate %."
+        )
+        st.caption(
+            f"\U0001f9e0 **Areas auto-calculated from uploaded GeoJSON polygons.** "
+            f"{_denom_label} Values are editable."
+        )
     analytics_rows: list[dict] = []
     has_analytics = False
 
@@ -768,6 +1034,15 @@ def _render_create_item_section() -> None:
     header_cols[2].markdown("**% Covered**")
 
     for cls_name in _ANALYTIC_CLASSES:
+        # Find the akey whose class matches this row
+        auto_area = 0.0
+        for akey, mapped_cls in _AKEY_TO_CLASS.items():
+            if mapped_cls == cls_name:
+                auto_area = _computed_areas.get(akey, 0.0)
+                break
+
+        auto_pct = round((auto_area / _denom_km2 * 100), 2) if (_denom_km2 > 0 and auto_area > 0) else 0.0
+
         row_cols = st.columns([3, 2, 2])
         with row_cols[0]:
             st.markdown(
@@ -778,14 +1053,16 @@ def _render_create_item_section() -> None:
         with row_cols[1]:
             area_val = st.number_input(
                 f"km² {cls_name}",
-                min_value=0.0, step=0.001, format="%.3f",
+                value=round(auto_area, 4),
+                min_value=0.0, step=0.001, format="%.4f",
                 key=f"analytics_area_{cls_name}",
                 label_visibility="collapsed",
             )
         with row_cols[2]:
             pct_val = st.number_input(
                 f"% {cls_name}",
-                min_value=0.0, max_value=100.0, step=0.1, format="%.1f",
+                value=round(auto_pct, 2),
+                min_value=0.0, max_value=100.0, step=0.01, format="%.2f",
                 key=f"analytics_pct_{cls_name}",
                 label_visibility="collapsed",
             )
