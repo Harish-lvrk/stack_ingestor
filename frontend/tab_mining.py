@@ -844,13 +844,13 @@ def _render_create_item_section() -> None:
     )
 
     _AKEY_TO_CLASS: dict[str, str | None] = {
-        "boundary":     None,
-        "mining_area":  "Mining Area",
-        "new_mine_pit": "New Mine Pit Area",
-        "stockpile":    "Stockpile / Dumping Area",
-        "reclamation":  "Reclamation",
-        "haul_roads":   None,
-        "water_pits":   "Temporary Water Pits",
+        "boundary":             None,
+        "mining_area":          "Mining Area",
+        "new_mine_pit":         "New Mine Pit Area",
+        "stockpile":            "Stockpile / Dumping Area",
+        "reclamation":          "Reclamation",
+        "haul_roads":           None,
+        "temporary_water_pits": "Temporary Water Pits",
     }
 
     _computed_areas = st.session_state.get(_area_sk, {})
