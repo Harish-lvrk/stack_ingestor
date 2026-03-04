@@ -80,12 +80,22 @@ def _item_folder(col_id: str, item_id: str) -> Path:
 
 
 def _mining_collection_ids() -> list[str]:
-    """Return collection IDs directly from the STAC API."""
-    return sorted(c.get("id") for c in fetch_collections() if "id" in c)
+    """Return collection IDs from STAC API (source of truth).
+    Falls back to local MINING_ROOT dirs if API is unavailable."""
+    try:
+        api_ids = set(fetch_collection_ids())
+        if api_ids:
+            return sorted(api_ids)
+    except Exception:
+        pass
+    # Fallback: local directories
+    if not MINING_ROOT.exists():
+        return []
+    return sorted(p.name for p in MINING_ROOT.iterdir() if p.is_dir())
 
 
 def _mining_collections() -> list[dict]:
-    """Return full collection dicts directly from the STAC API."""
+    """Return full collection dicts for all mining collections."""
     return fetch_collections()
 
 
@@ -553,7 +563,13 @@ def _render_collections_section() -> None:
                         if st.button("✅ Yes", key=f"mine_del_col_yes_{cid}"):
                             ok, err = api_delete_collection(cid)
                             if ok:
-                                st.success("Deleted.")
+                                # Also remove ALL items from STAC (cascade)
+                                # and delete local folder with all files
+                                import shutil as _shu
+                                _local = MINING_ROOT / cid
+                                if _local.exists():
+                                    _shu.rmtree(_local)
+                                st.success(f"Deleted collection **{cid}** and all local files.")
                                 st.rerun()
                             else:
                                 st.error(err)
@@ -1696,6 +1712,22 @@ def _render_browse_items_section() -> None:
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def render_mining_tab() -> None:
+    _dark = st.session_state.get("dark_mode", False)
+    _tcol = "#f1f5f9" if _dark else "#0f172a"
+
+    st.markdown(
+        f"""
+        <div style="padding:0.5rem 0 0.8rem;">
+          <h2 style="font-size:1.75rem;font-weight:800;margin:0;color:{_tcol};">
+            ⛏️ Mining Manager
+          </h2>
+          <p style="color:var(--text-muted,#64748b);margin-top:0.2rem;font-size:0.88rem;">
+            Create and manage mining areas and their survey items
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # ── Session-state-driven navigation (supports programmatic tab switching) ──
     active = st.session_state.get("mining_active_tab", 0)
