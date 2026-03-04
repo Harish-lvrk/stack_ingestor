@@ -22,6 +22,7 @@ from .utils import (
     _extract_image_date,
     _geojson_area_km2,
     _item_folder,
+    _mining_collection_ids,
     _mining_collections,
     _section_header,
     _validate_geojson_bytes,
