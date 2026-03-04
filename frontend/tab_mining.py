@@ -386,7 +386,7 @@ def _render_collections_section() -> None:
                 </div>
                 """, unsafe_allow_html=True)
 
-                bc1, bc2, bc3 = st.columns([3, 1, 1])
+                bc1, bc2, bc3, bc4 = st.columns([3, 1, 1, 1])
                 with bc1:
                     if st.button("Browse Items →",
                                  key=f"mine_browse_{cid}",
@@ -398,10 +398,21 @@ def _render_collections_section() -> None:
                     if st.button("✏️", key=f"mine_edit_col_{cid}",
                                  help=f"Edit {cid}"):
                         st.session_state[f"mine_editing_col_{cid}"] = not st.session_state.get(f"mine_editing_col_{cid}", False)
+                        st.session_state.pop(f"mine_viewjson_{cid}", None)
                 with bc3:
+                    if st.button("📄", key=f"mine_json_col_{cid}",
+                                 help=f"View STAC JSON for {cid}"):
+                        st.session_state[f"mine_viewjson_{cid}"] = not st.session_state.get(f"mine_viewjson_{cid}", False)
+                        st.session_state.pop(f"mine_editing_col_{cid}", None)
+                with bc4:
                     if st.button("🗑️", key=f"mine_del_col_{cid}",
                                  help=f"Delete {cid}"):
                         st.session_state[f"mine_confirm_del_col_{cid}"] = True
+
+                # ─ View Raw STAC JSON (standalone, no edit required) ──────────
+                if st.session_state.get(f"mine_viewjson_{cid}"):
+                    with st.expander(f"👁️ Raw STAC JSON — {cid}", expanded=True):
+                        st.json(col)
 
                 # ─ Edit Collection form ─────────────────────────────────────
                 if st.session_state.get(f"mine_editing_col_{cid}"):
@@ -916,17 +927,60 @@ def _render_create_item_section() -> None:
     }
 
     _computed_areas = st.session_state.get(_area_sk, {})
-    _boundary_km2   = _computed_areas.get("boundary", 0.0)
 
-    # ─ Push computed areas into widget session_state keys (only when areas change) ─
-    _applied_key = f"_gj_applied_{item_id_auto or 'new'}"
+    # ─ % denominator = geodesic area of the selected collection's bbox ─────────
+    # Manager requirement: % = layer_area / collection_bbox_area × 100
+    _col_bbox_km2  = 0.0
+    _col_bbox_info = ""
+    _selected_col  = st.session_state.get("mining_selected_col", "")
+    if _selected_col:
+        try:
+            from backend.stac_api import fetch_collection as _fc
+            _col_data = _fc(_selected_col)
+            _bbox = (
+                _col_data.get("extent", {})
+                         .get("spatial", {})
+                         .get("bbox", [[]])[0]
+            )
+            if isinstance(_bbox, list) and len(_bbox) == 4:
+                _min_lon, _min_lat, _max_lon, _max_lat = map(float, _bbox)
+                _rect_ring = [
+                    [_min_lon, _min_lat], [_max_lon, _min_lat],
+                    [_max_lon, _max_lat], [_min_lon, _max_lat],
+                    [_min_lon, _min_lat],
+                ]
+                try:
+                    from pyproj import Geod as _G2
+                    _g2  = _G2(ellps="WGS84")
+                    _lons = [float(p[0]) for p in _rect_ring]
+                    _lats = [float(p[1]) for p in _rect_ring]
+                    _a2, _ = _g2.polygon_area_perimeter(_lons, _lats)
+                    _col_bbox_km2 = abs(float(_a2)) / 1_000_000
+                except ImportError:
+                    import numpy as _npb
+                    _R2 = 6_371_000.0
+                    _lo = _npb.radians([float(p[0]) for p in _rect_ring])
+                    _la = _npb.radians([float(p[1]) for p in _rect_ring])
+                    _col_bbox_km2 = abs(float(
+                        _npb.sum(_npb.diff(_lo) * (_npb.sin(_la[:-1]) + _npb.sin(_la[1:])))
+                    )) * _R2 * _R2 / 2 / 1_000_000
+                _col_bbox_info = (
+                    f"**{_selected_col}** bbox area = **{_col_bbox_km2:.4f} km\u00b2**"
+                )
+        except Exception:
+            pass
+
+    # Fall back to uploaded boundary.geojson area when no collection bbox set
+    _denom_km2 = _col_bbox_km2 if _col_bbox_km2 > 0 else _computed_areas.get("boundary", 0.0)
+
+    # ─ Push computed areas into widget session_state keys (only on new uploads) ─
+    _applied_key  = f"_gj_applied_{item_id_auto or 'new'}"
     _last_applied = st.session_state.get(_applied_key, {})
     if _computed_areas != _last_applied:
-        # New file(s) uploaded → override widget values
         for _akey, _mapped_cls in _AKEY_TO_CLASS.items():
             if _mapped_cls:
                 _a = _computed_areas.get(_akey, 0.0)
-                _p = round(_a / _boundary_km2 * 100, 2) if (_boundary_km2 > 0 and _a > 0) else 0.0
+                _p = round(_a / _denom_km2 * 100, 2) if (_denom_km2 > 0 and _a > 0) else 0.0
                 st.session_state[f"analytics_area_{_mapped_cls}"] = round(_a, 4)
                 st.session_state[f"analytics_pct_{_mapped_cls}"]  = _p
         st.session_state[_applied_key] = dict(_computed_areas)
@@ -936,12 +990,15 @@ def _render_create_item_section() -> None:
         for k, cls in _AKEY_TO_CLASS.items() if cls
     )
     if has_auto_fill:
-        st.caption(
-            "🧠 **Areas auto-calculated from uploaded GeoJSON polygons.**"
-            + (f" Boundary total = **{_boundary_km2:.4f} km²** (used for % calculation)." if _boundary_km2 > 0 else " Upload `boundary.geojson` to auto-calculate %.")
-            + " Values are editable."
+        _denom_label = (
+            f"Collection bbox area: {_col_bbox_info} used for % calculation."
+            if _col_bbox_km2 > 0
+            else "Set collection bbox or upload `boundary.geojson` to auto-calculate %."
         )
-
+        st.caption(
+            f"\U0001f9e0 **Areas auto-calculated from uploaded GeoJSON polygons.** "
+            f"{_denom_label} Values are editable."
+        )
     analytics_rows: list[dict] = []
     has_analytics = False
 
