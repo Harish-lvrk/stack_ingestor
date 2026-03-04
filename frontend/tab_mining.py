@@ -1631,17 +1631,34 @@ def render_mining_tab() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_areas, tab_item, tab_browse = st.tabs([
-        "🗺️  Mining Areas",
-        "📌  Create Survey Item",
-        "📋  Browse Items",
-    ])
+    # ── Session-state-driven navigation (supports programmatic tab switching) ──
+    active = st.session_state.get("mining_active_tab", 0)
 
-    with tab_areas:
+    _NAV = [
+        ("🗺️  Mining Areas",      0),
+        ("📌  Create Survey Item", 1),
+        ("📋  Browse Items",       2),
+    ]
+
+    nav_cols = st.columns(len(_NAV))
+    for col, (label, idx) in zip(nav_cols, _NAV):
+        _style = (
+            "border-bottom:3px solid var(--accent,#4f46e5);"
+            "background:transparent;font-weight:700;"
+        ) if idx == active else ""
+        if col.button(label, key=f"_mining_nav_{idx}", use_container_width=True):
+            st.session_state["mining_active_tab"] = idx
+            st.rerun()
+
+    st.markdown(
+        "<hr style=\"margin:0 0 1rem;border:none;border-top:1px solid "
+        "var(--border,#e2e8f0);\">",
+        unsafe_allow_html=True,
+    )
+
+    if active == 0:
         _render_collections_section()
-
-    with tab_item:
+    elif active == 1:
         _render_create_item_section()
-
-    with tab_browse:
+    elif active == 2:
         _render_browse_items_section()
